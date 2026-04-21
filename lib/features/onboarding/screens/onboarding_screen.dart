@@ -218,7 +218,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
                 // illustration with float animation
                 SizedBox(
-                  height: size.height * 0.46,
+                  height: size.height * 0.40,
                   child: PageView.builder(
                     controller: _pageController,
                     onPageChanged: _onPageChanged,
@@ -255,7 +255,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const SizedBox(height: AppSpacing.lg),
+                            const SizedBox(height: AppSpacing.md),
                             _CategoryChip(
                               label: slide.chip,
                               color: slide.chipColor,
