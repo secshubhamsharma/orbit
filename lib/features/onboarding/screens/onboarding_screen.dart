@@ -164,34 +164,34 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           ),
 
           SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(0, AppSpacing.lg, 0, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                // illustration with float animation
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // illustration — ClipRect contains the ±10px float animation
                 SizedBox(
-                  height: size.height * 0.38,
-                  child: PageView.builder(
-                    controller: _pageController,
-                    onPageChanged: _onPageChanged,
-                    physics: const BouncingScrollPhysics(),
-                    itemCount: _slides.length,
-                    itemBuilder: (context, i) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: AnimatedBuilder(
-                          animation: _floatAnim,
-                          builder: (context, child) {
-                            return Transform.translate(
-                              offset: Offset(0, _floatAnim.value),
-                              child: child,
-                            );
-                          },
-                          child: OnboardingIllustration(index: i),
-                        ),
-                      );
-                    },
+                  height: size.height * 0.42,
+                  child: ClipRect(
+                    child: PageView.builder(
+                      controller: _pageController,
+                      onPageChanged: _onPageChanged,
+                      physics: const BouncingScrollPhysics(),
+                      itemCount: _slides.length,
+                      itemBuilder: (context, i) {
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(16, AppSpacing.xl, 16, 0),
+                          child: AnimatedBuilder(
+                            animation: _floatAnim,
+                            builder: (context, child) {
+                              return Transform.translate(
+                                offset: Offset(0, _floatAnim.value),
+                                child: child,
+                              );
+                            },
+                            child: OnboardingIllustration(index: i),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
 
@@ -207,8 +207,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                         position: _textSlide,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const SizedBox(height: AppSpacing.md),
                             _CategoryChip(
                               label: slide.chip,
                               color: slide.chipColor,
@@ -239,9 +239,9 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.pagePadding,
-                    AppSpacing.sm,
+                    0,
                     AppSpacing.pagePadding,
-                    AppSpacing.xl,
+                    AppSpacing.xxl,
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -264,7 +264,6 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               ],
             ),
           ),
-        ),
         ],
       ),
     );

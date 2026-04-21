@@ -232,8 +232,8 @@ class _ProgressScene extends StatelessWidget {
           children: [
             // circular mastery ring
             SizedBox(
-              width: 140,
-              height: 140,
+              width: 120,
+              height: 120,
               child: CustomPaint(
                 painter: _MasteryRingPainter(progress: 0.78),
                 child: Center(
@@ -242,7 +242,7 @@ class _ProgressScene extends StatelessWidget {
                     children: [
                       Text(
                         '78%',
-                        style: AppTextStyles.headingLarge.copyWith(fontSize: 28),
+                        style: AppTextStyles.headingLarge.copyWith(fontSize: 24),
                       ),
                       Text(
                         'Mastery',
@@ -256,12 +256,12 @@ class _ProgressScene extends StatelessWidget {
               ),
             ),
 
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
 
             // topic progress bars
             _CardShell(
               width: 240,
-              height: 110,
+              height: 104,
               opacity: 1.0,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -277,8 +277,8 @@ class _ProgressScene extends StatelessWidget {
 
         // streak badge
         Positioned(
-          top: 20,
-          right: 26,
+          top: 10,
+          right: 20,
           child: _CardShell(
             width: 74,
             height: 66,
