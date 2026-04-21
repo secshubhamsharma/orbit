@@ -33,14 +33,14 @@ class _OnboardingScreenState extends State<OnboardingScreen>
       chipColor: AppColors.kPrimary,
       title: 'Turn any topic\ninto flashcards',
       body:
-          'Choose from thousands of ready-made decks for JEE, UPSC, CCNA — or upload a PDF and let AI build the cards for you.',
+          'Choose from thousands of ready-made decks for JEE, UPSC, CCNA or upload a PDF and let AI build the cards for you.',
     ),
     _SlideData(
       chip: 'Spaced Repetition',
       chipColor: AppColors.kSecondary,
       title: 'AI that knows\nwhen you\'ll forget',
       body:
-          'Our SM-2 algorithm schedules every review at the exact right moment. Study less, retain more — for life.',
+          'Our SM-2 algorithm schedules every review at the exact right moment. Study less, retain more for life.',
     ),
     _SlideData(
       chip: 'Track Progress',
@@ -286,7 +286,7 @@ class _SlideData {
   });
 }
 
-// ─── Category chip ────────────────────────────────────────────────────────────
+// ─── Eyebrow label — replaces the AI-generated pill chip ─────────────────────
 
 class _CategoryChip extends StatelessWidget {
   final String label;
@@ -296,31 +296,28 @@ class _CategoryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 20,
+          height: 2,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(1),
           ),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: AppTextStyles.labelSmall.copyWith(
-              color: color,
-              fontWeight: FontWeight.w600,
-            ),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          label.toUpperCase(),
+          style: AppTextStyles.labelSmall.copyWith(
+            color: color,
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 2.0,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

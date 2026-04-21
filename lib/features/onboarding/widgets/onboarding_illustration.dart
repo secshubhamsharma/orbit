@@ -6,23 +6,22 @@ import '../../../core/constants/app_text_styles.dart';
 
 class OnboardingIllustration extends StatelessWidget {
   final int index;
-
   const OnboardingIllustration({super.key, required this.index});
 
   @override
   Widget build(BuildContext context) {
     return switch (index) {
-      0 => const _FlashcardScene(),
-      1 => const _AlgorithmScene(),
-      _ => const _ProgressScene(),
+      0 => const _ReviewScene(),
+      1 => const _RetentionScene(),
+      _ => const _HeatmapScene(),
     };
   }
 }
 
-// ─── Scene 1 — AI Flashcard Generation ───────────────────────────────────────
+// ─── Scene 1 — Mini review screen (what the actual app looks like) ────────────
 
-class _FlashcardScene extends StatelessWidget {
-  const _FlashcardScene();
+class _ReviewScene extends StatelessWidget {
+  const _ReviewScene();
 
   @override
   Widget build(BuildContext context) {
@@ -30,291 +29,442 @@ class _FlashcardScene extends StatelessWidget {
       alignment: Alignment.center,
       clipBehavior: Clip.none,
       children: [
-        // glow blob
-        const _GlowBlob(color: AppColors.kPrimary, size: 280, opacity: 0.15),
+        // glow
+        _GlowBlob(color: AppColors.kPrimary, size: 260, opacity: 0.12),
 
-        // back card — tilted left
+        // depth card behind
         Transform.translate(
-          offset: const Offset(-24, 28),
+          offset: const Offset(10, 12),
           child: Transform.rotate(
-            angle: -0.14,
-            child: _CardShell(
-              width: 220,
-              height: 130,
-              opacity: 0.45,
-              child: _CardContent(
-                topLabel: 'UPSC GS-1',
-                lines: 3,
-                lineColor: AppColors.kPrimary.withValues(alpha: 0.3),
+            angle: 0.04,
+            child: Container(
+              width: 248,
+              height: 192,
+              decoration: BoxDecoration(
+                color: AppColors.kSurfaceVariant,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppColors.kBorder.withValues(alpha: 0.4)),
               ),
             ),
           ),
         ),
 
-        // mid card — tilted right
-        Transform.translate(
-          offset: const Offset(22, 18),
-          child: Transform.rotate(
-            angle: 0.1,
-            child: _CardShell(
-              width: 220,
-              height: 130,
-              opacity: 0.65,
-              child: _CardContent(
-                topLabel: 'JEE Mains',
-                lines: 3,
-                lineColor: AppColors.kSecondary.withValues(alpha: 0.3),
+        // main card
+        Container(
+          width: 248,
+          height: 192,
+          decoration: BoxDecoration(
+            color: AppColors.kSurface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.kBorder),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.4),
+                blurRadius: 32,
+                offset: const Offset(0, 12),
               ),
-            ),
+            ],
           ),
-        ),
-
-        // front card — straight
-        _CardShell(
-          width: 230,
-          height: 138,
-          opacity: 1.0,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _MiniChip(label: 'CCNA', color: AppColors.kSecondary),
-              const SizedBox(height: 10),
-              Text(
-                'What is the purpose of\na subnet mask?',
-                style: AppTextStyles.bodySmall.copyWith(
-                  color: AppColors.kTextPrimary,
-                  fontWeight: FontWeight.w500,
-                  fontSize: 13,
+              // top bar
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: AppColors.kBorder)),
                 ),
-              ),
-              const Spacer(),
-              Row(
-                children: [
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppColors.kPrimary.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
-                      border: Border.all(
-                        color: AppColors.kPrimary.withValues(alpha: 0.3),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
                       children: [
-                        const Icon(Icons.flip_rounded, size: 11, color: AppColors.kPrimary),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Tap to flip',
-                          style: AppTextStyles.labelSmall.copyWith(
-                            color: AppColors.kPrimary,
-                            fontSize: 10,
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.kSecondary.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(4),
                           ),
+                          child: Text(
+                            'CCNA',
+                            style: AppTextStyles.caption.copyWith(
+                              color: AppColors.kSecondary,
+                              fontSize: 8,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Network Basics',
+                          style: AppTextStyles.caption.copyWith(fontSize: 9),
                         ),
                       ],
                     ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-
-        // floating domain tags
-        Positioned(
-          top: 30,
-          right: 28,
-          child: _FloatingTag(label: 'AI Generated', color: AppColors.kAccent),
-        ),
-        Positioned(
-          bottom: 38,
-          left: 22,
-          child: _FloatingTag(label: '30 cards', color: AppColors.kPrimary),
-        ),
-
-        // decorative dots
-        Positioned(top: 60, left: 30, child: _Dot(color: AppColors.kPrimary, size: 6)),
-        Positioned(bottom: 80, right: 30, child: _Dot(color: AppColors.kSecondary, size: 5)),
-        Positioned(top: 120, right: 18, child: _Dot(color: AppColors.kAccent, size: 4)),
-      ],
-    );
-  }
-}
-
-// ─── Scene 2 — Spaced Repetition Algorithm ────────────────────────────────────
-
-class _AlgorithmScene extends StatelessWidget {
-  const _AlgorithmScene();
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      alignment: Alignment.center,
-      clipBehavior: Clip.none,
-      children: [
-        const _GlowBlob(color: AppColors.kSecondary, size: 260, opacity: 0.14),
-
-        // concentric rings
-        _Ring(size: 240, color: AppColors.kSecondary, opacity: 0.08),
-        _Ring(size: 180, color: AppColors.kSecondary, opacity: 0.12),
-        _Ring(size: 120, color: AppColors.kSecondary, opacity: 0.18),
-
-        // center card
-        _CardShell(
-          width: 140,
-          height: 90,
-          opacity: 1.0,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 22,
-                    height: 22,
-                    decoration: BoxDecoration(
-                      color: AppColors.kSuccess.withValues(alpha: 0.15),
-                      shape: BoxShape.circle,
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.kSurfaceVariant,
+                        borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
+                      ),
+                      child: Text(
+                        '12 / 30',
+                        style: AppTextStyles.caption.copyWith(fontSize: 8),
+                      ),
                     ),
-                    child: const Icon(
-                      Icons.check_rounded,
-                      size: 13,
-                      color: AppColors.kSuccess,
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  Text(
-                    'Due Today',
-                    style: AppTextStyles.labelMedium.copyWith(fontSize: 11),
-                  ),
-                ],
+                  ],
+                ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                '12 cards',
-                style: AppTextStyles.headingMedium.copyWith(fontSize: 18),
-              ),
-            ],
-          ),
-        ),
 
-        // interval labels around the rings
-        _IntervalBadge(label: '+1 day', angle: -math.pi / 4, radius: 110),
-        _IntervalBadge(label: '+6 days', angle: math.pi / 6, radius: 130),
-        _IntervalBadge(label: '+14 days', angle: math.pi * 0.75, radius: 115),
-        _IntervalBadge(label: '+21 days', angle: -math.pi * 0.65, radius: 125),
-
-        // decorative dots
-        Positioned(top: 40, left: 40, child: _Dot(color: AppColors.kSecondary, size: 7)),
-        Positioned(bottom: 50, right: 35, child: _Dot(color: AppColors.kPrimary, size: 5)),
-      ],
-    );
-  }
-}
-
-// ─── Scene 3 — Progress & Mastery ────────────────────────────────────────────
-
-class _ProgressScene extends StatelessWidget {
-  const _ProgressScene();
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      alignment: Alignment.center,
-      clipBehavior: Clip.none,
-      children: [
-        const _GlowBlob(color: AppColors.kAccent, size: 260, opacity: 0.13),
-
-        Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // circular mastery ring
-            SizedBox(
-              width: 120,
-              height: 120,
-              child: CustomPaint(
-                painter: _MasteryRingPainter(progress: 0.78),
-                child: Center(
+              // question body
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
                   child: Column(
-                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
-                        '78%',
-                        style: AppTextStyles.headingLarge.copyWith(fontSize: 24),
-                      ),
-                      Text(
-                        'Mastery',
-                        style: AppTextStyles.caption.copyWith(
-                          color: AppColors.kTextSecondary,
+                        'What is the purpose\nof a subnet mask?',
+                        textAlign: TextAlign.center,
+                        style: AppTextStyles.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          height: 1.5,
                         ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Container(height: 1, color: AppColors.kDivider),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: Text(
+                              'tap to reveal',
+                              style: AppTextStyles.caption.copyWith(
+                                fontSize: 8,
+                                color: AppColors.kTextSecondary,
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Container(height: 1, color: AppColors.kDivider),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
               ),
-            ),
 
-            const SizedBox(height: 14),
-
-            // topic progress bars
-            _CardShell(
-              width: 240,
-              height: 104,
-              opacity: 1.0,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: const [
-                  _TopicBar(label: 'Physics', percent: 0.91, color: AppColors.kSuccess),
-                  _TopicBar(label: 'Mathematics', percent: 0.72, color: AppColors.kPrimary),
-                  _TopicBar(label: 'History', percent: 0.55, color: AppColors.kWarning),
-                ],
-              ),
-            ),
-          ],
-        ),
-
-        // streak badge
-        Positioned(
-          top: 10,
-          right: 20,
-          child: _CardShell(
-            width: 74,
-            height: 66,
-            opacity: 1.0,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.local_fire_department_rounded, color: AppColors.kAccent, size: 18),
-                const SizedBox(height: 2),
-                Text(
-                  '14 days',
-                  style: AppTextStyles.labelSmall.copyWith(
-                    color: AppColors.kAccent,
-                    fontSize: 10,
-                  ),
+              // rating buttons
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: AppColors.kBorder)),
                 ),
-              ],
-            ),
+                child: Row(
+                  children: [
+                    _RatingBtn(label: 'Again', color: AppColors.kError),
+                    const SizedBox(width: 5),
+                    _RatingBtn(label: 'Hard', color: AppColors.kWarning),
+                    const SizedBox(width: 5),
+                    _RatingBtn(label: 'Good', color: AppColors.kPrimary, active: true),
+                    const SizedBox(width: 5),
+                    _RatingBtn(label: 'Easy', color: AppColors.kSuccess),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
 
-        Positioned(top: 55, left: 28, child: _Dot(color: AppColors.kAccent, size: 6)),
-        Positioned(bottom: 65, right: 24, child: _Dot(color: AppColors.kSuccess, size: 5)),
+        // floating badges
+        Positioned(
+          top: 22,
+          right: 6,
+          child: _Badge(
+            label: 'AI Built',
+            icon: Icons.auto_awesome_rounded,
+            color: AppColors.kAccent,
+          ),
+        ),
+        Positioned(
+          bottom: 24,
+          left: 6,
+          child: _Badge(
+            label: '30 cards',
+            icon: Icons.layers_rounded,
+            color: AppColors.kPrimary,
+          ),
+        ),
       ],
     );
   }
 }
 
-// ─── Reusable building blocks ─────────────────────────────────────────────────
+// ─── Scene 2 — Memory retention curve ────────────────────────────────────────
+
+class _RetentionScene extends StatelessWidget {
+  const _RetentionScene();
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.center,
+      clipBehavior: Clip.none,
+      children: [
+        _GlowBlob(color: AppColors.kSecondary, size: 260, opacity: 0.12),
+
+        Container(
+          width: 264,
+          decoration: BoxDecoration(
+            color: AppColors.kSurface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.kBorder),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.35),
+                blurRadius: 28,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Memory Retention',
+                    style: AppTextStyles.labelMedium.copyWith(fontSize: 11),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.kSuccess.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '↑ 94%',
+                      style: AppTextStyles.caption.copyWith(
+                        color: AppColors.kSuccess,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 9,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                height: 96,
+                width: double.infinity,
+                child: CustomPaint(painter: _RetentionPainter()),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _LegendDot(color: AppColors.kSecondary, label: 'With Orbit'),
+                  const SizedBox(width: 14),
+                  _LegendDot(
+                    color: AppColors.kTextSecondary.withValues(alpha: 0.4),
+                    label: 'Without review',
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        // due today badge
+        Positioned(
+          top: 14,
+          right: 0,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.kSurfaceVariant,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.kBorder),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'DUE TODAY',
+                  style: AppTextStyles.caption.copyWith(
+                    fontSize: 7,
+                    letterSpacing: 1.4,
+                    color: AppColors.kTextSecondary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '12',
+                  style: AppTextStyles.headingMedium.copyWith(
+                    color: AppColors.kSecondary,
+                    fontSize: 22,
+                    height: 1,
+                  ),
+                ),
+                Text(
+                  'cards',
+                  style: AppTextStyles.caption.copyWith(fontSize: 8),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Scene 3 — Study heatmap ──────────────────────────────────────────────────
+
+class _HeatmapScene extends StatelessWidget {
+  const _HeatmapScene();
+
+  // 0 = none  1 = low  2 = mid  3 = high
+  static const _grid = [
+    [0, 1, 2, 3, 2, 1, 0],
+    [1, 3, 3, 2, 3, 2, 1],
+    [0, 2, 3, 3, 1, 3, 2],
+    [1, 1, 2, 3, 3, 2, 3],
+    [0, 2, 3, 2, 3, 0, 0],
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.center,
+      clipBehavior: Clip.none,
+      children: [
+        _GlowBlob(color: AppColors.kAccent, size: 240, opacity: 0.12),
+
+        Container(
+          width: 264,
+          decoration: BoxDecoration(
+            color: AppColors.kSurface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.kBorder),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.35),
+                blurRadius: 28,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Study Activity',
+                    style: AppTextStyles.labelMedium.copyWith(fontSize: 11),
+                  ),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.local_fire_department_rounded,
+                        color: AppColors.kAccent,
+                        size: 12,
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        '14-day streak',
+                        style: AppTextStyles.caption.copyWith(
+                          color: AppColors.kAccent,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 9,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+
+              // day labels
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children:
+                    ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d) {
+                  return SizedBox(
+                    width: 28,
+                    child: Center(
+                      child: Text(
+                        d,
+                        style: AppTextStyles.caption.copyWith(
+                          fontSize: 8,
+                          color: AppColors.kTextSecondary,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 5),
+
+              // heat cells
+              ...List.generate(_grid.length, (row) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 5),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: List.generate(7, (col) {
+                      final level = _grid[row][col];
+                      final isToday = row == 4 && col == 4;
+                      return _HeatCell(level: level, isToday: isToday);
+                    }),
+                  ),
+                );
+              }),
+
+              const SizedBox(height: 12),
+              Container(height: 1, color: AppColors.kDivider),
+              const SizedBox(height: 12),
+
+              // stat row
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _Stat(value: '87%', label: 'Accuracy', color: AppColors.kSuccess),
+                  _Stat(value: '124', label: 'Mastered', color: AppColors.kPrimary),
+                  _Stat(value: '14', label: 'Day streak', color: AppColors.kAccent),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Shared primitives ────────────────────────────────────────────────────────
 
 class _GlowBlob extends StatelessWidget {
   final Color color;
   final double size;
   final double opacity;
 
-  const _GlowBlob({required this.color, required this.size, required this.opacity});
+  const _GlowBlob({
+    required this.color,
+    required this.size,
+    required this.opacity,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -325,119 +475,58 @@ class _GlowBlob extends StatelessWidget {
         shape: BoxShape.circle,
         gradient: RadialGradient(
           colors: [color.withValues(alpha: opacity), Colors.transparent],
-          stops: const [0.0, 1.0],
         ),
       ),
     );
   }
 }
 
-class _CardShell extends StatelessWidget {
-  final double width;
-  final double height;
-  final double opacity;
-  final Widget child;
+class _RatingBtn extends StatelessWidget {
+  final String label;
+  final Color color;
+  final bool active;
 
-  const _CardShell({
-    required this.width,
-    required this.height,
-    required this.opacity,
-    required this.child,
+  const _RatingBtn({
+    required this.label,
+    required this.color,
+    this.active = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Opacity(
-      opacity: opacity,
+    return Expanded(
       child: Container(
-        width: width,
-        height: height,
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(vertical: 5),
         decoration: BoxDecoration(
-          color: AppColors.kSurface,
-          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-          border: Border.all(color: AppColors.kBorder),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
+          color: active ? color.withValues(alpha: 0.18) : AppColors.kSurfaceVariant,
+          borderRadius: BorderRadius.circular(6),
+          border: active ? Border.all(color: color.withValues(alpha: 0.45)) : null,
         ),
-        child: child,
-      ),
-    );
-  }
-}
-
-class _CardContent extends StatelessWidget {
-  final String topLabel;
-  final int lines;
-  final Color lineColor;
-
-  const _CardContent({
-    required this.topLabel,
-    required this.lines,
-    required this.lineColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(topLabel, style: AppTextStyles.caption),
-        const SizedBox(height: 8),
-        ...List.generate(lines, (i) => Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Container(
-            height: 8,
-            width: i == lines - 1 ? 80 : double.infinity,
-            decoration: BoxDecoration(
-              color: lineColor,
-              borderRadius: BorderRadius.circular(4),
-            ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: AppTextStyles.caption.copyWith(
+            fontSize: 9,
+            color: active ? color : AppColors.kTextSecondary,
+            fontWeight: active ? FontWeight.w700 : FontWeight.w400,
           ),
-        )),
-      ],
-    );
-  }
-}
-
-class _MiniChip extends StatelessWidget {
-  final String label;
-  final Color color;
-
-  const _MiniChip({required this.label, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Text(
-        label,
-        style: AppTextStyles.labelSmall.copyWith(color: color, fontSize: 10),
+        ),
       ),
     );
   }
 }
 
-class _FloatingTag extends StatelessWidget {
+class _Badge extends StatelessWidget {
   final String label;
+  final IconData icon;
   final Color color;
 
-  const _FloatingTag({required this.label, required this.color});
+  const _Badge({required this.label, required this.icon, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: AppColors.kSurfaceVariant,
         borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
@@ -450,173 +539,215 @@ class _FloatingTag extends StatelessWidget {
           ),
         ],
       ),
-      child: Text(
-        label,
-        style: AppTextStyles.labelSmall.copyWith(color: color),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 11, color: color),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: AppTextStyles.caption.copyWith(
+              color: color,
+              fontWeight: FontWeight.w600,
+              fontSize: 10,
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _Dot extends StatelessWidget {
+class _LegendDot extends StatelessWidget {
   final Color color;
-  final double size;
-
-  const _Dot({required this.color, required this.size});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    );
-  }
-}
-
-class _Ring extends StatelessWidget {
-  final double size;
-  final Color color;
-  final double opacity;
-
-  const _Ring({required this.size, required this.color, required this.opacity});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: color.withValues(alpha: opacity), width: 1.5),
-      ),
-    );
-  }
-}
-
-class _IntervalBadge extends StatelessWidget {
   final String label;
-  final double angle;
-  final double radius;
 
-  const _IntervalBadge({
-    required this.label,
-    required this.angle,
-    required this.radius,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Transform.translate(
-      offset: Offset(
-        math.cos(angle) * radius,
-        math.sin(angle) * radius,
-      ),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: AppColors.kSurfaceVariant,
-          borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
-          border: Border.all(color: AppColors.kBorder),
-        ),
-        child: Text(label, style: AppTextStyles.caption.copyWith(fontSize: 10)),
-      ),
-    );
-  }
-}
-
-class _TopicBar extends StatelessWidget {
-  final String label;
-  final double percent;
-  final Color color;
-
-  const _TopicBar({
-    required this.label,
-    required this.percent,
-    required this.color,
-  });
+  const _LegendDot({required this.color, required this.label});
 
   @override
   Widget build(BuildContext context) {
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        SizedBox(
-          width: 72,
-          child: Text(
-            label,
-            style: AppTextStyles.caption.copyWith(fontSize: 10),
-            overflow: TextOverflow.ellipsis,
-          ),
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
-            child: LinearProgressIndicator(
-              value: percent,
-              backgroundColor: AppColors.kSurfaceHigh,
-              valueColor: AlwaysStoppedAnimation<Color>(color),
-              minHeight: 5,
-            ),
-          ),
-        ),
-        const SizedBox(width: 6),
+        const SizedBox(width: 5),
         Text(
-          '${(percent * 100).toInt()}%',
-          style: AppTextStyles.caption.copyWith(
-            color: color,
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-          ),
+          label,
+          style: AppTextStyles.caption.copyWith(fontSize: 9),
         ),
       ],
     );
   }
 }
 
-class _MasteryRingPainter extends CustomPainter {
-  final double progress;
+class _HeatCell extends StatelessWidget {
+  final int level;
+  final bool isToday;
 
-  _MasteryRingPainter({required this.progress});
+  const _HeatCell({required this.level, this.isToday = false});
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2 - 8;
-    final strokeWidth = 9.0;
-
-    // track
-    canvas.drawCircle(
-      center,
-      radius,
-      Paint()
-        ..color = AppColors.kSurfaceVariant
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth,
-    );
-
-    // gradient arc — fake it with two-color sweep
-    final rect = Rect.fromCircle(center: center, radius: radius);
-    final sweepPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth
-      ..strokeCap = StrokeCap.round
-      ..shader = const SweepGradient(
-        colors: [AppColors.kPrimary, AppColors.kAccent],
-        startAngle: 0,
-        endAngle: math.pi * 2,
-        transform: GradientRotation(-math.pi / 2),
-      ).createShader(rect);
-
-    canvas.drawArc(
-      rect,
-      -math.pi / 2,
-      2 * math.pi * progress,
-      false,
-      sweepPaint,
-    );
+  Color get _fill {
+    return switch (level) {
+      0 => AppColors.kSurfaceVariant,
+      1 => AppColors.kAccent.withValues(alpha: 0.18),
+      2 => AppColors.kAccent.withValues(alpha: 0.45),
+      _ => AppColors.kAccent.withValues(alpha: 0.82),
+    };
   }
 
   @override
-  bool shouldRepaint(_MasteryRingPainter old) => old.progress != progress;
+  Widget build(BuildContext context) {
+    return Container(
+      width: 28,
+      height: 16,
+      decoration: BoxDecoration(
+        color: _fill,
+        borderRadius: BorderRadius.circular(4),
+        border: isToday
+            ? Border.all(color: AppColors.kAccent, width: 1.5)
+            : null,
+      ),
+    );
+  }
+}
+
+class _Stat extends StatelessWidget {
+  final String value;
+  final String label;
+  final Color color;
+
+  const _Stat({required this.value, required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: AppTextStyles.headingSmall.copyWith(
+            color: color,
+            fontSize: 18,
+            height: 1,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: AppTextStyles.caption.copyWith(fontSize: 8),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Retention curve painter ──────────────────────────────────────────────────
+
+class _RetentionPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    // y-axis labels
+    final labelStyle = TextStyle(
+      color: AppColors.kTextSecondary.withValues(alpha: 0.5),
+      fontSize: 7,
+      fontFamily: 'PlusJakartaSans',
+    );
+    for (final pct in [100, 50]) {
+      final y = pct == 100 ? 0.0 : h * 0.6;
+      final tp = TextPainter(
+        text: TextSpan(text: '$pct%', style: labelStyle),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(0, y));
+    }
+
+    final chartLeft = 24.0;
+    final chartW = w - chartLeft;
+
+    // threshold line (dashed)
+    final dashPaint = Paint()
+      ..color = AppColors.kTextSecondary.withValues(alpha: 0.2)
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+
+    double dx = chartLeft;
+    final threshY = h * 0.58;
+    while (dx < w) {
+      canvas.drawLine(
+        Offset(dx, threshY),
+        Offset(math.min(dx + 4, w), threshY),
+        dashPaint,
+      );
+      dx += 7;
+    }
+
+    // without-review decay curve
+    final decayPath = Path()
+      ..moveTo(chartLeft, h * 0.04)
+      ..cubicTo(
+        chartLeft + chartW * 0.25, h * 0.12,
+        chartLeft + chartW * 0.5, h * 0.55,
+        w, h * 0.88,
+      );
+    canvas.drawPath(
+      decayPath,
+      Paint()
+        ..color = AppColors.kTextSecondary.withValues(alpha: 0.3)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..strokeCap = StrokeCap.round,
+    );
+
+    // review points on the orbit curve
+    final reviewsX = [0.0, 0.22, 0.44, 0.68, 0.88];
+    final orbitPath = Path();
+    orbitPath.moveTo(chartLeft, h * 0.04);
+
+    for (int i = 0; i < reviewsX.length - 1; i++) {
+      final x0 = chartLeft + reviewsX[i] * chartW;
+      final x1 = chartLeft + reviewsX[i + 1] * chartW;
+      final dropY = h * (0.14 + i * 0.06);
+      orbitPath.cubicTo(
+        x0 + (x1 - x0) * 0.55, dropY + h * 0.12,
+        x1 - (x1 - x0) * 0.15, dropY,
+        x1, h * 0.06,
+      );
+    }
+    final lx = chartLeft + reviewsX.last * chartW;
+    orbitPath.cubicTo(lx + (w - lx) * 0.4, h * 0.10, w, h * 0.08, w, h * 0.07);
+
+    canvas.drawPath(
+      orbitPath,
+      Paint()
+        ..color = AppColors.kSecondary
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.0
+        ..strokeCap = StrokeCap.round,
+    );
+
+    // review dot markers
+    for (int i = 1; i < reviewsX.length; i++) {
+      final cx = chartLeft + reviewsX[i] * chartW;
+      const cy = 6.0;
+      canvas.drawCircle(
+        Offset(cx, cy),
+        5.5,
+        Paint()..color = AppColors.kSecondary.withValues(alpha: 0.18),
+      );
+      canvas.drawCircle(
+        Offset(cx, cy),
+        3,
+        Paint()..color = AppColors.kSecondary,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RetentionPainter old) => false;
 }
