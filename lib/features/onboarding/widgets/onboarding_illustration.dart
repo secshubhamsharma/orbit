@@ -163,7 +163,7 @@ class _AlgorithmScene extends StatelessWidget {
         // center card
         _CardShell(
           width: 140,
-          height: 80,
+          height: 90,
           opacity: 1.0,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -281,7 +281,7 @@ class _ProgressScene extends StatelessWidget {
           right: 26,
           child: _CardShell(
             width: 74,
-            height: 52,
+            height: 66,
             opacity: 1.0,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,

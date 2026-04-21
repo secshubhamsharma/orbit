@@ -167,55 +167,6 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // top bar
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.pagePadding,
-                    AppSpacing.md,
-                    AppSpacing.pagePadding,
-                    0,
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 30,
-                            height: 30,
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: AppColors.kGradientPrimary,
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.circular(9),
-                            ),
-                            child: const Icon(
-                              Icons.public_rounded,
-                              size: 17,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Orbit',
-                            style: AppTextStyles.labelLarge.copyWith(fontSize: 16),
-                          ),
-                        ],
-                      ),
-                      if (_current < _slides.length - 1)
-                        TextButton(
-                          onPressed: _finish,
-                          style: TextButton.styleFrom(
-                            foregroundColor: AppColors.kTextSecondary,
-                          ),
-                          child: const Text('Skip'),
-                        ),
-                    ],
-                  ),
-                ),
-
                 // illustration with float animation
                 SizedBox(
                   height: size.height * 0.40,
