@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:go_router/go_router.dart';
 
 import '../../features/onboarding/screens/splash_screen.dart';
@@ -31,7 +32,7 @@ import 'route_names.dart';
 
 final appRouter = GoRouter(
   initialLocation: '/splash',
-  debugLogDiagnostics: true,
+  debugLogDiagnostics: kDebugMode,
   routes: [
     GoRoute(
       path: '/splash',

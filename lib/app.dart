@@ -1,18 +1,21 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 
-class OrbitApp extends ConsumerWidget {
+class OrbitApp extends StatelessWidget {
   const OrbitApp({super.key});
 
+  // Built once at class load time — never re-computed on rebuilds.
+  static final _dark  = AppTheme.dark;
+  static final _light = AppTheme.light;
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     return MaterialApp.router(
       title: 'Orbit',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
-      darkTheme: AppTheme.dark,
+      theme: _light,
+      darkTheme: _dark,
       themeMode: ThemeMode.dark,
       routerConfig: appRouter,
     );

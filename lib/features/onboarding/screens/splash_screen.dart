@@ -1,3 +1,5 @@
+import 'dart:math' show sin, pi;
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -28,8 +30,8 @@ class _SplashScreenState extends State<SplashScreen>
       duration: const Duration(milliseconds: 900),
     );
 
-    _fadeAnim = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
-    _scaleAnim = Tween<double>(begin: 0.8, end: 1.0).animate(
+    _fadeAnim  = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _scaleAnim = Tween<double>(begin: 0.85, end: 1.0).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
     );
 
@@ -44,17 +46,20 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _navigate() async {
-    // let the splash animate before checking prefs
-    await Future.delayed(const Duration(milliseconds: 1800));
+    // Run the minimum display timer and the prefs read at the same time.
+    // main() already called SharedPreferences.getInstance() so the read is
+    // instant — but we still await it in case a slow device hasn't finished.
+    final results = await Future.wait<dynamic>([
+      SharedPreferences.getInstance(),
+      Future<void>.delayed(const Duration(milliseconds: 1200)),
+    ]);
+
     if (!mounted) return;
 
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = results[0] as SharedPreferences;
     final onboardingDone = prefs.getBool('onboarding_done') ?? false;
 
-    if (!mounted) return;
-
     if (onboardingDone) {
-      // TODO: also check Firebase auth state here in Phase 2
       context.go('/auth/login');
     } else {
       context.go('/onboarding');
@@ -67,7 +72,7 @@ class _SplashScreenState extends State<SplashScreen>
       backgroundColor: AppColors.kBackground,
       body: Stack(
         children: [
-          // ambient glow
+          // ambient glow — top right
           Positioned(
             top: -80,
             right: -60,
@@ -77,14 +82,12 @@ class _SplashScreenState extends State<SplashScreen>
               decoration: const BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
-                  colors: [
-                    Color(0x287C6FE8),
-                    Colors.transparent,
-                  ],
+                  colors: [Color(0x287C6FE8), Colors.transparent],
                 ),
               ),
             ),
           ),
+          // ambient glow — bottom left
           Positioned(
             bottom: -60,
             left: -40,
@@ -94,10 +97,7 @@ class _SplashScreenState extends State<SplashScreen>
               decoration: const BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
-                  colors: [
-                    Color(0x144ECDC4),
-                    Colors.transparent,
-                  ],
+                  colors: [Color(0x144ECDC4), Colors.transparent],
                 ),
               ),
             ),
@@ -154,7 +154,7 @@ class _SplashScreenState extends State<SplashScreen>
             ),
           ),
 
-          // bottom loading dots
+          // loading dots
           Positioned(
             bottom: 60,
             left: 0,
@@ -169,6 +169,8 @@ class _SplashScreenState extends State<SplashScreen>
     );
   }
 }
+
+// ─── Loading dots ─────────────────────────────────────────────────────────────
 
 class _LoadingDots extends StatefulWidget {
   const _LoadingDots();
@@ -207,11 +209,9 @@ class _LoadingDotsState extends State<_LoadingDots>
           builder: (context, child) {
             final delay = i * 0.3;
             final t = ((_controller.value - delay) % 1.0).clamp(0.0, 1.0);
-            final opacity = (_sinApprox(t * 3.14159)).clamp(0.2, 1.0);
-            return Opacity(
-              opacity: opacity,
-              child: child,
-            );
+            // dart:math sin — accurate and hardware-friendly
+            final opacity = sin(t * pi).clamp(0.2, 1.0);
+            return Opacity(opacity: opacity, child: child);
           },
           child: Container(
             width: 5,
@@ -225,11 +225,5 @@ class _LoadingDotsState extends State<_LoadingDots>
         );
       }),
     );
-  }
-
-  // simple sine without importing dart:math
-  double _sinApprox(double x) {
-    // Taylor series approximation for sin — good enough for opacity animation
-    return x - (x * x * x) / 6 + (x * x * x * x * x) / 120;
   }
 }
