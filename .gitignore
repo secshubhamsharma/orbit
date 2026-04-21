@@ -43,3 +43,23 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Claude / Codex / AI assistant local files
+.claude/
+.codex/
+.claude.json
+.codex.json
+ai-notes.md
+local-prompts/
+sessions/
+temp/
+logs/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# OS/editor junk
+.DS_Store
+.vscode/
