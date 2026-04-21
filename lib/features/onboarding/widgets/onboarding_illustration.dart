@@ -204,7 +204,7 @@ class _ReviewScene extends StatelessWidget {
   }
 }
 
-// ─── Scene 2 — Spaced repetition (concentric rings) ──────────────────────────
+// ─── Scene 2 — Memory retention curve ────────────────────────────────────────
 
 class _RetentionScene extends StatelessWidget {
   const _RetentionScene();
@@ -215,62 +215,112 @@ class _RetentionScene extends StatelessWidget {
       alignment: Alignment.center,
       clipBehavior: Clip.none,
       children: [
-        _GlowBlob(color: AppColors.kSecondary, size: 260, opacity: 0.14),
+        _GlowBlob(color: AppColors.kSecondary, size: 260, opacity: 0.12),
 
-        // concentric rings
-        _Ring(size: 240, color: AppColors.kSecondary, opacity: 0.08),
-        _Ring(size: 180, color: AppColors.kSecondary, opacity: 0.12),
-        _Ring(size: 120, color: AppColors.kSecondary, opacity: 0.18),
-
-        // center card
-        _CardShell(
-          width: 140,
-          height: 90,
-          opacity: 1.0,
+        Container(
+          width: 264,
+          decoration: BoxDecoration(
+            color: AppColors.kSurface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.kBorder),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.35),
+                blurRadius: 28,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.all(16),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Container(
-                    width: 22,
-                    height: 22,
-                    decoration: BoxDecoration(
-                      color: AppColors.kSuccess.withValues(alpha: 0.15),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.check_rounded,
-                      size: 13,
-                      color: AppColors.kSuccess,
-                    ),
-                  ),
-                  const SizedBox(width: 7),
                   Text(
-                    'Due Today',
+                    'Memory Retention',
                     style: AppTextStyles.labelMedium.copyWith(fontSize: 11),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.kSuccess.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '↑ 94%',
+                      style: AppTextStyles.caption.copyWith(
+                        color: AppColors.kSuccess,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 9,
+                      ),
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                '12 cards',
-                style: AppTextStyles.headingMedium.copyWith(fontSize: 18),
+              const SizedBox(height: 14),
+              SizedBox(
+                height: 96,
+                width: double.infinity,
+                child: CustomPaint(painter: _RetentionPainter()),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _LegendDot(color: AppColors.kSecondary, label: 'With Orbit'),
+                  const SizedBox(width: 14),
+                  _LegendDot(
+                    color: AppColors.kTextSecondary.withValues(alpha: 0.4),
+                    label: 'Without review',
+                  ),
+                ],
               ),
             ],
           ),
         ),
 
-        // interval labels orbiting the rings
-        _IntervalBadge(label: '+1 day', angle: -math.pi / 4, radius: 110),
-        _IntervalBadge(label: '+6 days', angle: math.pi / 6, radius: 130),
-        _IntervalBadge(label: '+14 days', angle: math.pi * 0.75, radius: 115),
-        _IntervalBadge(label: '+21 days', angle: -math.pi * 0.65, radius: 125),
-
-        // decorative dots
-        Positioned(top: 40, left: 40, child: _Dot(color: AppColors.kSecondary, size: 7)),
-        Positioned(bottom: 50, right: 35, child: _Dot(color: AppColors.kPrimary, size: 5)),
+        // due today badge
+        Positioned(
+          top: 14,
+          right: 0,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.kSurfaceVariant,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.kBorder),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'DUE TODAY',
+                  style: AppTextStyles.caption.copyWith(
+                    fontSize: 7,
+                    letterSpacing: 1.4,
+                    color: AppColors.kTextSecondary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '12',
+                  style: AppTextStyles.headingMedium.copyWith(
+                    color: AppColors.kSecondary,
+                    fontSize: 22,
+                    height: 1,
+                  ),
+                ),
+                Text(
+                  'cards',
+                  style: AppTextStyles.caption.copyWith(fontSize: 8),
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -405,110 +455,123 @@ class _HeatmapScene extends StatelessWidget {
 
 // ─── Scene 2 helpers ─────────────────────────────────────────────────────────
 
-class _CardShell extends StatelessWidget {
-  final double width;
-  final double height;
-  final double opacity;
-  final Widget child;
-
-  const _CardShell({
-    required this.width,
-    required this.height,
-    required this.opacity,
-    required this.child,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Opacity(
-      opacity: opacity,
-      child: Container(
-        width: width,
-        height: height,
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppColors.kSurface,
-          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-          border: Border.all(color: AppColors.kBorder),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: child,
-      ),
-    );
-  }
-}
-
-class _Ring extends StatelessWidget {
-  final double size;
+class _LegendDot extends StatelessWidget {
   final Color color;
-  final double opacity;
-
-  const _Ring({required this.size, required this.color, required this.opacity});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: color.withValues(alpha: opacity), width: 1.5),
-      ),
-    );
-  }
-}
-
-class _IntervalBadge extends StatelessWidget {
   final String label;
-  final double angle;
-  final double radius;
 
-  const _IntervalBadge({
-    required this.label,
-    required this.angle,
-    required this.radius,
-  });
+  const _LegendDot({required this.color, required this.label});
 
   @override
   Widget build(BuildContext context) {
-    return Transform.translate(
-      offset: Offset(
-        math.cos(angle) * radius,
-        math.sin(angle) * radius,
-      ),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: AppColors.kSurfaceVariant,
-          borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
-          border: Border.all(color: AppColors.kBorder),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-        child: Text(label, style: AppTextStyles.caption.copyWith(fontSize: 10)),
-      ),
+        const SizedBox(width: 5),
+        Text(label, style: AppTextStyles.caption.copyWith(fontSize: 9)),
+      ],
     );
   }
 }
 
-class _Dot extends StatelessWidget {
-  final Color color;
-  final double size;
+class _RetentionPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
 
-  const _Dot({required this.color, required this.size});
+    final labelStyle = TextStyle(
+      color: AppColors.kTextSecondary.withValues(alpha: 0.5),
+      fontSize: 7,
+      fontFamily: 'PlusJakartaSans',
+    );
+    for (final pct in [100, 50]) {
+      final y = pct == 100 ? 0.0 : h * 0.6;
+      final tp = TextPainter(
+        text: TextSpan(text: '$pct%', style: labelStyle),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(0, y));
+    }
+
+    const chartLeft = 24.0;
+    final chartW = w - chartLeft;
+
+    // dashed threshold line
+    final dashPaint = Paint()
+      ..color = AppColors.kTextSecondary.withValues(alpha: 0.2)
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+    double dx = chartLeft;
+    final threshY = h * 0.58;
+    while (dx < w) {
+      canvas.drawLine(
+        Offset(dx, threshY),
+        Offset(math.min(dx + 4, w), threshY),
+        dashPaint,
+      );
+      dx += 7;
+    }
+
+    // without-review decay curve (grey)
+    final decayPath = Path()
+      ..moveTo(chartLeft, h * 0.04)
+      ..cubicTo(
+        chartLeft + chartW * 0.25, h * 0.12,
+        chartLeft + chartW * 0.5, h * 0.55,
+        w, h * 0.88,
+      );
+    canvas.drawPath(
+      decayPath,
+      Paint()
+        ..color = AppColors.kTextSecondary.withValues(alpha: 0.3)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..strokeCap = StrokeCap.round,
+    );
+
+    // with Orbit — sawtooth that stays high (teal)
+    final reviewsX = [0.0, 0.22, 0.44, 0.68, 0.88];
+    final orbitPath = Path();
+    orbitPath.moveTo(chartLeft, h * 0.04);
+    for (int i = 0; i < reviewsX.length - 1; i++) {
+      final x0 = chartLeft + reviewsX[i] * chartW;
+      final x1 = chartLeft + reviewsX[i + 1] * chartW;
+      final dropY = h * (0.14 + i * 0.06);
+      orbitPath.cubicTo(
+        x0 + (x1 - x0) * 0.55, dropY + h * 0.12,
+        x1 - (x1 - x0) * 0.15, dropY,
+        x1, h * 0.06,
+      );
+    }
+    final lx = chartLeft + reviewsX.last * chartW;
+    orbitPath.cubicTo(lx + (w - lx) * 0.4, h * 0.10, w, h * 0.08, w, h * 0.07);
+    canvas.drawPath(
+      orbitPath,
+      Paint()
+        ..color = AppColors.kSecondary
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.0
+        ..strokeCap = StrokeCap.round,
+    );
+
+    // review dot markers
+    for (int i = 1; i < reviewsX.length; i++) {
+      final cx = chartLeft + reviewsX[i] * chartW;
+      const cy = 6.0;
+      canvas.drawCircle(Offset(cx, cy), 5.5,
+          Paint()..color = AppColors.kSecondary.withValues(alpha: 0.18));
+      canvas.drawCircle(Offset(cx, cy), 3,
+          Paint()..color = AppColors.kSecondary);
+    }
+  }
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    );
-  }
+  bool shouldRepaint(_RetentionPainter old) => false;
 }
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
