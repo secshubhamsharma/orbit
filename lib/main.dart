@@ -11,7 +11,6 @@ void main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  // TODO: Firebase.initializeApp() once google-services.json is added
 
   runApp(
     const ProviderScope(

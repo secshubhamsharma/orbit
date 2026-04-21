@@ -13,7 +13,7 @@ class OrbitApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
-      themeMode: ThemeMode.dark, // TODO: drive from settingsProvider
+      themeMode: ThemeMode.dark,
       routerConfig: appRouter,
     );
   }
