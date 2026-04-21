@@ -164,12 +164,14 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           ),
 
           SafeArea(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(0, AppSpacing.lg, 0, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                 // illustration with float animation
                 SizedBox(
-                  height: size.height * 0.40,
+                  height: size.height * 0.38,
                   child: PageView.builder(
                     controller: _pageController,
                     onPageChanged: _onPageChanged,
@@ -262,6 +264,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               ],
             ),
           ),
+        ),
         ],
       ),
     );
