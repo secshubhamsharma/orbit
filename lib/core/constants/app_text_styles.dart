@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'app_colors.dart';
+
+const _fontFamily = 'PlusJakartaSans';
 
 class AppTextStyles {
   AppTextStyles._();
 
-  // display — used on splash, onboarding hero text
-  static TextStyle get displayLarge => GoogleFonts.plusJakartaSans(
+  static TextStyle get displayLarge => const TextStyle(
+        fontFamily: _fontFamily,
         fontSize: 36,
         fontWeight: FontWeight.w800,
         letterSpacing: -1.0,
@@ -14,7 +15,8 @@ class AppTextStyles {
         color: AppColors.kTextPrimary,
       );
 
-  static TextStyle get displayMedium => GoogleFonts.plusJakartaSans(
+  static TextStyle get displayMedium => const TextStyle(
+        fontFamily: _fontFamily,
         fontSize: 28,
         fontWeight: FontWeight.w700,
         letterSpacing: -0.5,
@@ -22,8 +24,8 @@ class AppTextStyles {
         color: AppColors.kTextPrimary,
       );
 
-  // headings — screen titles, section headers
-  static TextStyle get headingLarge => GoogleFonts.plusJakartaSans(
+  static TextStyle get headingLarge => const TextStyle(
+        fontFamily: _fontFamily,
         fontSize: 24,
         fontWeight: FontWeight.w700,
         letterSpacing: -0.3,
@@ -31,7 +33,8 @@ class AppTextStyles {
         color: AppColors.kTextPrimary,
       );
 
-  static TextStyle get headingMedium => GoogleFonts.plusJakartaSans(
+  static TextStyle get headingMedium => const TextStyle(
+        fontFamily: _fontFamily,
         fontSize: 20,
         fontWeight: FontWeight.w600,
         letterSpacing: -0.2,
@@ -39,7 +42,8 @@ class AppTextStyles {
         color: AppColors.kTextPrimary,
       );
 
-  static TextStyle get headingSmall => GoogleFonts.plusJakartaSans(
+  static TextStyle get headingSmall => const TextStyle(
+        fontFamily: _fontFamily,
         fontSize: 17,
         fontWeight: FontWeight.w600,
         letterSpacing: -0.1,
@@ -47,30 +51,32 @@ class AppTextStyles {
         color: AppColors.kTextPrimary,
       );
 
-  // body — regular content
-  static TextStyle get bodyLarge => GoogleFonts.plusJakartaSans(
+  static TextStyle get bodyLarge => const TextStyle(
+        fontFamily: _fontFamily,
         fontSize: 16,
         fontWeight: FontWeight.w400,
         height: 1.5,
         color: AppColors.kTextPrimary,
       );
 
-  static TextStyle get bodyMedium => GoogleFonts.plusJakartaSans(
+  static TextStyle get bodyMedium => const TextStyle(
+        fontFamily: _fontFamily,
         fontSize: 14,
         fontWeight: FontWeight.w400,
         height: 1.5,
         color: AppColors.kTextPrimary,
       );
 
-  static TextStyle get bodySmall => GoogleFonts.plusJakartaSans(
+  static TextStyle get bodySmall => const TextStyle(
+        fontFamily: _fontFamily,
         fontSize: 13,
         fontWeight: FontWeight.w400,
         height: 1.45,
         color: AppColors.kTextSecondary,
       );
 
-  // label — buttons, chips, tags
-  static TextStyle get labelLarge => GoogleFonts.plusJakartaSans(
+  static TextStyle get labelLarge => const TextStyle(
+        fontFamily: _fontFamily,
         fontSize: 15,
         fontWeight: FontWeight.w600,
         letterSpacing: 0.1,
@@ -78,7 +84,8 @@ class AppTextStyles {
         color: AppColors.kTextPrimary,
       );
 
-  static TextStyle get labelMedium => GoogleFonts.plusJakartaSans(
+  static TextStyle get labelMedium => const TextStyle(
+        fontFamily: _fontFamily,
         fontSize: 13,
         fontWeight: FontWeight.w600,
         letterSpacing: 0.1,
@@ -86,7 +93,8 @@ class AppTextStyles {
         color: AppColors.kTextPrimary,
       );
 
-  static TextStyle get labelSmall => GoogleFonts.plusJakartaSans(
+  static TextStyle get labelSmall => const TextStyle(
+        fontFamily: _fontFamily,
         fontSize: 11,
         fontWeight: FontWeight.w500,
         letterSpacing: 0.3,
@@ -94,16 +102,16 @@ class AppTextStyles {
         color: AppColors.kTextSecondary,
       );
 
-  // caption — timestamps, metadata
-  static TextStyle get caption => GoogleFonts.plusJakartaSans(
+  static TextStyle get caption => const TextStyle(
+        fontFamily: _fontFamily,
         fontSize: 12,
         fontWeight: FontWeight.w400,
         height: 1.4,
         color: AppColors.kTextSecondary,
       );
 
-  // flashcard specific
-  static TextStyle get cardFront => GoogleFonts.plusJakartaSans(
+  static TextStyle get cardFront => const TextStyle(
+        fontFamily: _fontFamily,
         fontSize: 22,
         fontWeight: FontWeight.w600,
         height: 1.4,
@@ -111,7 +119,8 @@ class AppTextStyles {
         color: AppColors.kTextPrimary,
       );
 
-  static TextStyle get cardBack => GoogleFonts.plusJakartaSans(
+  static TextStyle get cardBack => const TextStyle(
+        fontFamily: _fontFamily,
         fontSize: 16,
         fontWeight: FontWeight.w400,
         height: 1.6,

@@ -1,8 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../constants/app_colors.dart';
 import '../constants/app_spacing.dart';
+
+const _font = 'PlusJakartaSans';
+
+TextStyle _ts({
+  required double size,
+  required FontWeight weight,
+  required Color color,
+  double? letterSpacing,
+  double? height,
+}) =>
+    TextStyle(
+      fontFamily: _font,
+      fontSize: size,
+      fontWeight: weight,
+      color: color,
+      letterSpacing: letterSpacing,
+      height: height,
+    );
 
 class AppTheme {
   AppTheme._();
@@ -16,6 +33,7 @@ class AppTheme {
     final base = ThemeData(
       brightness: brightness,
       useMaterial3: true,
+      fontFamily: _font,
       scaffoldBackgroundColor: AppColors.kBackground,
     );
 
@@ -41,10 +59,10 @@ class AppTheme {
         outlineVariant: AppColors.kDivider,
         scrim: AppColors.kScrim,
       ),
-      textTheme: GoogleFonts.plusJakartaSansTextTheme(base.textTheme).copyWith(
-        bodyLarge: GoogleFonts.plusJakartaSans(color: AppColors.kTextPrimary),
-        bodyMedium: GoogleFonts.plusJakartaSans(color: AppColors.kTextPrimary),
-        bodySmall: GoogleFonts.plusJakartaSans(color: AppColors.kTextSecondary),
+      textTheme: base.textTheme.apply(
+        fontFamily: _font,
+        bodyColor: AppColors.kTextPrimary,
+        displayColor: AppColors.kTextPrimary,
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: AppColors.kBackground,
@@ -52,9 +70,9 @@ class AppTheme {
         scrolledUnderElevation: 0,
         centerTitle: false,
         iconTheme: const IconThemeData(color: AppColors.kTextPrimary),
-        titleTextStyle: GoogleFonts.plusJakartaSans(
-          fontSize: 18,
-          fontWeight: FontWeight.w600,
+        titleTextStyle: _ts(
+          size: 18,
+          weight: FontWeight.w600,
           color: AppColors.kTextPrimary,
         ),
         systemOverlayStyle: const SystemUiOverlayStyle(
@@ -100,18 +118,9 @@ class AppTheme {
           borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           borderSide: const BorderSide(color: AppColors.kError, width: 1.5),
         ),
-        hintStyle: GoogleFonts.plusJakartaSans(
-          color: AppColors.kTextDisabled,
-          fontSize: 14,
-        ),
-        labelStyle: GoogleFonts.plusJakartaSans(
-          color: AppColors.kTextSecondary,
-          fontSize: 14,
-        ),
-        errorStyle: GoogleFonts.plusJakartaSans(
-          color: AppColors.kError,
-          fontSize: 12,
-        ),
+        hintStyle: _ts(size: 14, weight: FontWeight.w400, color: AppColors.kTextDisabled),
+        labelStyle: _ts(size: 14, weight: FontWeight.w400, color: AppColors.kTextSecondary),
+        errorStyle: _ts(size: 12, weight: FontWeight.w400, color: AppColors.kError),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
@@ -123,10 +132,7 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           ),
-          textStyle: GoogleFonts.plusJakartaSans(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-          ),
+          textStyle: _ts(size: 15, weight: FontWeight.w600, color: Colors.white),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -137,29 +143,19 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           ),
-          textStyle: GoogleFonts.plusJakartaSans(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-          ),
+          textStyle: _ts(size: 15, weight: FontWeight.w600, color: AppColors.kPrimary),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: AppColors.kPrimary,
-          textStyle: GoogleFonts.plusJakartaSans(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+          textStyle: _ts(size: 14, weight: FontWeight.w600, color: AppColors.kPrimary),
         ),
       ),
       chipTheme: ChipThemeData(
         backgroundColor: AppColors.kSurfaceVariant,
         selectedColor: AppColors.kPrimaryContainer,
-        labelStyle: GoogleFonts.plusJakartaSans(
-          fontSize: 13,
-          fontWeight: FontWeight.w500,
-          color: AppColors.kTextSecondary,
-        ),
+        labelStyle: _ts(size: 13, weight: FontWeight.w500, color: AppColors.kTextSecondary),
         side: const BorderSide(color: AppColors.kBorder),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
@@ -184,18 +180,11 @@ class AppTheme {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
         ),
-        titleTextStyle: GoogleFonts.plusJakartaSans(
-          fontSize: 18,
-          fontWeight: FontWeight.w600,
-          color: AppColors.kTextPrimary,
-        ),
+        titleTextStyle: _ts(size: 18, weight: FontWeight.w600, color: AppColors.kTextPrimary),
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: AppColors.kSurfaceHigh,
-        contentTextStyle: GoogleFonts.plusJakartaSans(
-          color: AppColors.kTextPrimary,
-          fontSize: 14,
-        ),
+        contentTextStyle: _ts(size: 14, weight: FontWeight.w400, color: AppColors.kTextPrimary),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         ),
@@ -224,6 +213,7 @@ class AppTheme {
     final base = ThemeData(
       brightness: brightness,
       useMaterial3: true,
+      fontFamily: _font,
       scaffoldBackgroundColor: AppColors.kBackgroundLight,
     );
 
@@ -249,10 +239,10 @@ class AppTheme {
         outlineVariant: AppColors.kDividerLight,
         scrim: AppColors.kScrim,
       ),
-      textTheme: GoogleFonts.plusJakartaSansTextTheme(base.textTheme).copyWith(
-        bodyLarge: GoogleFonts.plusJakartaSans(color: AppColors.kTextPrimaryLight),
-        bodyMedium: GoogleFonts.plusJakartaSans(color: AppColors.kTextPrimaryLight),
-        bodySmall: GoogleFonts.plusJakartaSans(color: AppColors.kTextSecondaryLight),
+      textTheme: base.textTheme.apply(
+        fontFamily: _font,
+        bodyColor: AppColors.kTextPrimaryLight,
+        displayColor: AppColors.kTextPrimaryLight,
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: AppColors.kBackgroundLight,
@@ -260,9 +250,9 @@ class AppTheme {
         scrolledUnderElevation: 0,
         centerTitle: false,
         iconTheme: const IconThemeData(color: AppColors.kTextPrimaryLight),
-        titleTextStyle: GoogleFonts.plusJakartaSans(
-          fontSize: 18,
-          fontWeight: FontWeight.w600,
+        titleTextStyle: _ts(
+          size: 18,
+          weight: FontWeight.w600,
           color: AppColors.kTextPrimaryLight,
         ),
         systemOverlayStyle: const SystemUiOverlayStyle(
@@ -308,18 +298,9 @@ class AppTheme {
           borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           borderSide: const BorderSide(color: AppColors.kError, width: 1.5),
         ),
-        hintStyle: GoogleFonts.plusJakartaSans(
-          color: AppColors.kTextDisabledLight,
-          fontSize: 14,
-        ),
-        labelStyle: GoogleFonts.plusJakartaSans(
-          color: AppColors.kTextSecondaryLight,
-          fontSize: 14,
-        ),
-        errorStyle: GoogleFonts.plusJakartaSans(
-          color: AppColors.kError,
-          fontSize: 12,
-        ),
+        hintStyle: _ts(size: 14, weight: FontWeight.w400, color: AppColors.kTextDisabledLight),
+        labelStyle: _ts(size: 14, weight: FontWeight.w400, color: AppColors.kTextSecondaryLight),
+        errorStyle: _ts(size: 12, weight: FontWeight.w400, color: AppColors.kError),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
@@ -331,10 +312,7 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           ),
-          textStyle: GoogleFonts.plusJakartaSans(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-          ),
+          textStyle: _ts(size: 15, weight: FontWeight.w600, color: Colors.white),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -345,29 +323,19 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           ),
-          textStyle: GoogleFonts.plusJakartaSans(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-          ),
+          textStyle: _ts(size: 15, weight: FontWeight.w600, color: AppColors.kPrimary),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: AppColors.kPrimary,
-          textStyle: GoogleFonts.plusJakartaSans(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+          textStyle: _ts(size: 14, weight: FontWeight.w600, color: AppColors.kPrimary),
         ),
       ),
       chipTheme: ChipThemeData(
         backgroundColor: AppColors.kSurfaceVariantLight,
         selectedColor: AppColors.kPrimaryContainerLight,
-        labelStyle: GoogleFonts.plusJakartaSans(
-          fontSize: 13,
-          fontWeight: FontWeight.w500,
-          color: AppColors.kTextSecondaryLight,
-        ),
+        labelStyle: _ts(size: 13, weight: FontWeight.w500, color: AppColors.kTextSecondaryLight),
         side: const BorderSide(color: AppColors.kBorderLight),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
@@ -392,18 +360,11 @@ class AppTheme {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
         ),
-        titleTextStyle: GoogleFonts.plusJakartaSans(
-          fontSize: 18,
-          fontWeight: FontWeight.w600,
-          color: AppColors.kTextPrimaryLight,
-        ),
+        titleTextStyle: _ts(size: 18, weight: FontWeight.w600, color: AppColors.kTextPrimaryLight),
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: AppColors.kTextPrimaryLight,
-        contentTextStyle: GoogleFonts.plusJakartaSans(
-          color: Colors.white,
-          fontSize: 14,
-        ),
+        contentTextStyle: _ts(size: 14, weight: FontWeight.w400, color: Colors.white),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         ),
