@@ -114,14 +114,13 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
     final slide = _slides[_current];
 
     return Scaffold(
       backgroundColor: AppColors.kBackground,
       body: Stack(
         children: [
-          // top-right ambient glow — shifts color per slide
+          // ambient glow — shifts color per slide
           AnimatedPositioned(
             duration: const Duration(milliseconds: 600),
             curve: Curves.easeInOut,
@@ -142,8 +141,6 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               ),
             ),
           ),
-
-          // bottom-left ambient
           Positioned(
             bottom: -60,
             left: -40,
@@ -167,9 +164,10 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // illustration — ClipRect contains the ±10px float animation
-                SizedBox(
-                  height: size.height * 0.42,
+
+                // ── Zone 1: illustration (50% of available height) ────────
+                Expanded(
+                  flex: 10,
                   child: ClipRect(
                     child: PageView.builder(
                       controller: _pageController,
@@ -178,15 +176,18 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                       itemCount: _slides.length,
                       itemBuilder: (context, i) {
                         return Padding(
-                          padding: const EdgeInsets.fromLTRB(16, AppSpacing.xl, 16, 0),
+                          padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.pagePadding,
+                            AppSpacing.xl,
+                            AppSpacing.pagePadding,
+                            AppSpacing.sm,
+                          ),
                           child: AnimatedBuilder(
                             animation: _floatAnim,
-                            builder: (context, child) {
-                              return Transform.translate(
-                                offset: Offset(0, _floatAnim.value),
-                                child: child,
-                              );
-                            },
+                            builder: (context, child) => Transform.translate(
+                              offset: Offset(0, _floatAnim.value),
+                              child: child,
+                            ),
                             child: OnboardingIllustration(index: i),
                           ),
                         );
@@ -195,72 +196,85 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                   ),
                 ),
 
-                // text — fades + slides in on each page change
+                // ── Zone 2: text + controls (50% of available height) ─────
                 Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.pagePadding,
-                    ),
-                    child: FadeTransition(
-                      opacity: _textFade,
-                      child: SlideTransition(
-                        position: _textSlide,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
+                  flex: 10,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // text block — fades + slides in on page change
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.pagePadding,
+                          AppSpacing.xl,
+                          AppSpacing.pagePadding,
+                          0,
+                        ),
+                        child: FadeTransition(
+                          opacity: _textFade,
+                          child: SlideTransition(
+                            position: _textSlide,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _CategoryChip(
+                                  label: slide.chip,
+                                  color: slide.chipColor,
+                                ),
+                                const SizedBox(height: AppSpacing.lg),
+                                Text(
+                                  slide.title,
+                                  style: AppTextStyles.displayMedium.copyWith(
+                                    height: 1.2,
+                                  ),
+                                ),
+                                const SizedBox(height: AppSpacing.md),
+                                Text(
+                                  slide.body,
+                                  style: AppTextStyles.bodyMedium.copyWith(
+                                    color: AppColors.kTextSecondary,
+                                    height: 1.6,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // flexible gap — pushes dots to the bottom
+                      const Spacer(),
+
+                      // dots + button row — always pinned to the bottom
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.pagePadding,
+                          0,
+                          AppSpacing.pagePadding,
+                          AppSpacing.xxl,
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            _CategoryChip(
-                              label: slide.chip,
+                            _PageDots(
+                              count: _slides.length,
+                              current: _current,
+                              activeColor: slide.chipColor,
+                            ),
+                            _ProgressButton(
+                              progress: (_current + 1) / _slides.length,
+                              onTap: _next,
+                              isLast: _current == _slides.length - 1,
                               color: slide.chipColor,
-                            ),
-                            const SizedBox(height: AppSpacing.md),
-                            Text(
-                              slide.title,
-                              style: AppTextStyles.displayMedium.copyWith(
-                                height: 1.2,
-                              ),
-                            ),
-                            const SizedBox(height: AppSpacing.sm + 2),
-                            Text(
-                              slide.body,
-                              style: AppTextStyles.bodyMedium.copyWith(
-                                color: AppColors.kTextSecondary,
-                                height: 1.65,
-                              ),
                             ),
                           ],
                         ),
                       ),
-                    ),
-                  ),
-                ),
-
-                // dots + button row
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.pagePadding,
-                    0,
-                    AppSpacing.pagePadding,
-                    AppSpacing.xxl,
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      _PageDots(
-                        count: _slides.length,
-                        current: _current,
-                        activeColor: slide.chipColor,
-                      ),
-                      _ProgressButton(
-                        progress: (_current + 1) / _slides.length,
-                        onTap: _next,
-                        isLast: _current == _slides.length - 1,
-                        color: slide.chipColor,
-                      ),
                     ],
                   ),
                 ),
+
               ],
             ),
           ),
