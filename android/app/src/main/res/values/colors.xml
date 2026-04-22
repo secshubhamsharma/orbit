@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App background colour shown in the Android launch window.
+         Must match AppColors.kBackground (#0A0B14) so there is no
+         visible flash before Flutter draws its first frame. -->
+    <color name="orbit_background">#0A0B14</color>
+</resources>
