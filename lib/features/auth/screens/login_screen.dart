@@ -140,13 +140,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
             children: [
               const SizedBox(height: 56),
 
-              // App identifier dot + wordmark
-              _fade(_buildWordmark(), 0.0),
-
-              const SizedBox(height: 32),
-
               // Headline
-              _fade(_buildHeadline(), 0.08),
+              _fade(_buildHeadline(), 0.0),
 
               const SizedBox(height: 40),
 
@@ -211,30 +206,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   // ---------------------------------------------------------------------------
   // Sub-widgets
   // ---------------------------------------------------------------------------
-
-  Widget _buildWordmark() {
-    return Row(
-      children: [
-        Container(
-          width: 7,
-          height: 7,
-          decoration: const BoxDecoration(
-            color: AppColors.kPrimary,
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: AppSpacing.sm),
-        Text(
-          'orbit',
-          style: AppTextStyles.labelMedium.copyWith(
-            color: AppColors.kPrimary,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.5,
-          ),
-        ),
-      ],
-    );
-  }
 
   Widget _buildHeadline() {
     return Column(

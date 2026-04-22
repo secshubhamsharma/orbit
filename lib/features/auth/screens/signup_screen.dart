@@ -211,52 +211,24 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
   // Sub-widgets
   // ---------------------------------------------------------------------------
 
-  /// Back button + wordmark in one row.
+  /// Back button — tapping pops to login (works because login used push).
   Widget _buildTopBar() {
-    return Row(
-      children: [
-        // Back button — tapping this pops back to login (works because
-        // login used context.push to get here)
-        GestureDetector(
-          onTap: () => context.pop(),
-          child: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.kSurface,
-              borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-              border: Border.all(color: AppColors.kBorder),
-            ),
-            child: const Icon(
-              Icons.arrow_back_ios_new_rounded,
-              size: 15,
-              color: AppColors.kTextPrimary,
-            ),
-          ),
+    return GestureDetector(
+      onTap: () => context.pop(),
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: AppColors.kSurface,
+          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+          border: Border.all(color: AppColors.kBorder),
         ),
-        const SizedBox(width: AppSpacing.md),
-        Row(
-          children: [
-            Container(
-              width: 7,
-              height: 7,
-              decoration: const BoxDecoration(
-                color: AppColors.kPrimary,
-                shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Text(
-              'orbit',
-              style: AppTextStyles.labelMedium.copyWith(
-                color: AppColors.kPrimary,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
+        child: const Icon(
+          Icons.arrow_back_ios_new_rounded,
+          size: 15,
+          color: AppColors.kTextPrimary,
         ),
-      ],
+      ),
     );
   }
 
