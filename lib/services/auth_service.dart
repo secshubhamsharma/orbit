@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import '../core/errors/app_exception.dart';
+import '../models/user_model.dart';
+import 'firestore_service.dart';
 
 class AuthService {
   AuthService._();
@@ -49,9 +51,21 @@ class AuthService {
         password: password,
       );
       await credential.user?.updateDisplayName(displayName.trim());
+
+      // Create Firestore user document
+      if (credential.user != null) {
+        final user = credential.user!;
+        await FirestoreService.instance.createUser(
+          UserModel.initial(
+            uid: user.uid,
+            email: email.trim(),
+            displayName: displayName.trim(),
+            photoUrl: user.photoURL,
+          ),
+        );
+      }
+
       // Non-fatal: account is already created at this point.
-      // If verification email fails (quota, App Check, etc.) the user
-      // can resend it from the verify-email screen.
       try {
         await credential.user?.sendEmailVerification();
       } catch (_) {}
@@ -87,7 +101,22 @@ class AuthService {
         idToken: googleAuth.idToken,
       );
 
-      return await _auth.signInWithCredential(credential);
+      final result = await _auth.signInWithCredential(credential);
+
+      // Create Firestore user document if first Google sign-in
+      if (result.additionalUserInfo?.isNewUser == true && result.user != null) {
+        final user = result.user!;
+        await FirestoreService.instance.createUser(
+          UserModel.initial(
+            uid: user.uid,
+            email: user.email ?? googleAccount.email,
+            displayName: user.displayName ?? googleAccount.displayName ?? '',
+            photoUrl: user.photoURL ?? googleAccount.photoUrl,
+          ),
+        );
+      }
+
+      return result;
     } on PlatformException catch (e) {
       throw _mapGooglePlatformError(e);
     } on FirebaseAuthException catch (e) {
