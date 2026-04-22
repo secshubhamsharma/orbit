@@ -135,14 +135,22 @@ class _SplashScreenState extends State<SplashScreen>
     final user            = FirebaseAuth.instance.currentUser;
 
     if (user != null) {
-      // Refresh the token so emailVerified reflects the latest server state.
-      await user.reload();
-      if (!mounted) return;
-      final refreshed = FirebaseAuth.instance.currentUser;
-      if (refreshed?.emailVerified ?? false) {
-        context.go('/home');
-      } else {
-        context.go('/auth/verify-email');
+      try {
+        // Refresh the token so emailVerified reflects the latest server state.
+        await user.reload();
+        if (!mounted) return;
+        final refreshed = FirebaseAuth.instance.currentUser;
+        if (refreshed?.emailVerified ?? false) {
+          context.go('/home');
+        } else {
+          context.go('/auth/verify-email');
+        }
+      } on FirebaseAuthException catch (_) {
+        // The cached user no longer exists on the server (deleted from console,
+        // token revoked, etc.). Sign out locally and redirect to login.
+        await FirebaseAuth.instance.signOut();
+        if (!mounted) return;
+        context.go(onboardingDone ? '/auth/login' : '/onboarding');
       }
     } else if (onboardingDone) {
       context.go('/auth/login');
