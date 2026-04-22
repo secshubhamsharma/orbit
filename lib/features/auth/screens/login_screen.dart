@@ -129,42 +129,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   // Reusable sub-widgets
   // ---------------------------------------------------------------------------
 
-  Widget _buildLogoMark() {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: AppColors.kGradientPrimary,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(9),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.kPrimary.withValues(alpha: 0.4),
-                blurRadius: 10,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          child: const Icon(Icons.public_rounded, size: 18, color: Colors.white),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          'ORBIT',
-          style: AppTextStyles.headingSmall.copyWith(
-            letterSpacing: 3,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildErrorBanner() {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
@@ -226,14 +190,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Logo mark — centred
-                _animated(
-                  Center(child: _buildLogoMark()),
-                  0.0,
-                ),
-
-                const SizedBox(height: 40),
-
                 // Welcome text
                 _animated(
                   Column(
