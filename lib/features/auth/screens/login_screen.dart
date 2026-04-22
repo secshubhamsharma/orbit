@@ -26,6 +26,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   final _passCtrl = TextEditingController();
 
   bool _isLoading = false;
+  bool _isGoogleLoading = false;
   String? _errorMessage;
 
   late final AnimationController _enterCtrl;
@@ -103,14 +104,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
   Future<void> _loginWithGoogle() async {
     setState(() {
-      _isLoading = true;
+      _isGoogleLoading = true;
       _errorMessage = null;
     });
 
     try {
       final cred = await ref.read(authServiceProvider).signInWithGoogle();
       if (!mounted) return;
-      if (cred == null) return; // user cancelled
+      if (cred == null) return; // user cancelled the picker
 
       if (cred.user?.emailVerified ?? true) {
         context.go('/home');
@@ -120,7 +121,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     } on AppException catch (e) {
       if (mounted) setState(() => _errorMessage = e.message);
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() => _isGoogleLoading = false);
     }
   }
 
@@ -358,20 +359,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
                 const SizedBox(height: 24),
 
-                // Social buttons
+                // Social buttons — full-width stacked (standard mobile pattern)
                 _animated(
-                  Row(
+                  Column(
                     children: [
-                      Expanded(
-                        child: SocialLoginButton.google(
-                          onTap: _isLoading ? null : _loginWithGoogle,
-                        ),
+                      SocialLoginButton.google(
+                        onTap: _isLoading ? null : _loginWithGoogle,
+                        isLoading: _isGoogleLoading,
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: SocialLoginButton.apple(
-                          onTap: _isLoading ? null : () {},
-                        ),
+                      const SizedBox(height: 12),
+                      SocialLoginButton.apple(
+                        onTap: _isLoading ? null : () {},
                       ),
                     ],
                   ),
