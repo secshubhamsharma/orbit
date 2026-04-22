@@ -48,7 +48,12 @@ class AuthService {
         password: password,
       );
       await credential.user?.updateDisplayName(displayName.trim());
-      await credential.user?.sendEmailVerification();
+      // Non-fatal: account is already created at this point.
+      // If verification email fails (quota, App Check, etc.) the user
+      // can resend it from the verify-email screen.
+      try {
+        await credential.user?.sendEmailVerification();
+      } catch (_) {}
       return credential;
     } on FirebaseAuthException catch (e) {
       throw _mapError(e);
