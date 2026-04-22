@@ -36,20 +36,20 @@ class DefaultFirebaseOptions {
   // ── Replace ALL values below with the output of `flutterfire configure` ───
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey:            'REPLACE_WITH_YOUR_ANDROID_API_KEY',
-    appId:             'REPLACE_WITH_YOUR_ANDROID_APP_ID',
-    messagingSenderId: 'REPLACE_WITH_YOUR_SENDER_ID',
-    projectId:         'REPLACE_WITH_YOUR_PROJECT_ID',
-    storageBucket:     'REPLACE_WITH_YOUR_STORAGE_BUCKET',
+    apiKey: 'AIzaSyDfOjfyY5kUG8e8aCHaDg8rmgQpStFjwsE',
+    appId: '1:138787937708:android:ac3a70f5d179198102ee09',
+    messagingSenderId: '138787937708',
+    projectId: 'orbitapp-4e44f',
+    storageBucket: 'orbitapp-4e44f.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey:            'REPLACE_WITH_YOUR_IOS_API_KEY',
-    appId:             'REPLACE_WITH_YOUR_IOS_APP_ID',
-    messagingSenderId: 'REPLACE_WITH_YOUR_SENDER_ID',
-    projectId:         'REPLACE_WITH_YOUR_PROJECT_ID',
-    storageBucket:     'REPLACE_WITH_YOUR_STORAGE_BUCKET',
-    iosBundleId:       'com.orbit.app.orbitapp',
+    apiKey: 'AIzaSyAbvUjCByPom7ff7h7i2fP1ObRO_tWSaWE',
+    appId: '1:138787937708:ios:575d9d6251cc700402ee09',
+    messagingSenderId: '138787937708',
+    projectId: 'orbitapp-4e44f',
+    storageBucket: 'orbitapp-4e44f.firebasestorage.app',
+    iosBundleId: 'com.orbit.app.orbitapp',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
