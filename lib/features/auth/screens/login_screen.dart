@@ -36,9 +36,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     super.initState();
     _enterCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _enterCtrl.forward();
+      duration: const Duration(milliseconds: 700),
+    )..forward();
   }
 
   @override
@@ -56,13 +55,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   Widget _animated(Widget child, double start) {
     final anim = CurvedAnimation(
       parent: _enterCtrl,
-      curve: Interval(start, (start + 0.5).clamp(0, 1), curve: Curves.easeOut),
+      curve: Interval(start, (start + 0.4).clamp(0.0, 1.0), curve: Curves.easeOut),
     );
     return FadeTransition(
       opacity: anim,
       child: SlideTransition(
         position: Tween<Offset>(
-          begin: const Offset(0, 0.12),
+          begin: const Offset(0, 0.08),
           end: Offset.zero,
         ).animate(anim),
         child: child,
@@ -89,7 +88,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           .signInWithEmail(_emailCtrl.text, _passCtrl.text);
 
       if (!mounted) return;
-
       if (cred.user?.emailVerified ?? false) {
         context.go('/home');
       } else {
@@ -111,7 +109,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     try {
       final cred = await ref.read(authServiceProvider).signInWithGoogle();
       if (!mounted) return;
-      if (cred == null) return; // user cancelled the picker
+      if (cred == null) return;
 
       if (cred.user?.emailVerified ?? true) {
         context.go('/home');
@@ -126,55 +124,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   }
 
   // ---------------------------------------------------------------------------
-  // Reusable sub-widgets
-  // ---------------------------------------------------------------------------
-
-  Widget _buildErrorBanner() {
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 300),
-      child: _errorMessage == null
-          ? const SizedBox.shrink()
-          : Container(
-              key: const ValueKey('error'),
-              width: double.infinity,
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                color: AppColors.kErrorContainer,
-                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                border: Border.all(
-                  color: AppColors.kError.withValues(alpha: 0.3),
-                ),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.error_outline_rounded,
-                    color: AppColors.kError,
-                    size: 16,
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: Text(
-                      _errorMessage!,
-                      style: AppTextStyles.bodySmall
-                          .copyWith(color: AppColors.kError),
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () => setState(() => _errorMessage = null),
-                    child: const Icon(
-                      Icons.close_rounded,
-                      color: AppColors.kError,
-                      size: 16,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-    );
-  }
-
-  // ---------------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------------
 
@@ -182,185 +131,351 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.kBackground,
-      body: SingleChildScrollView(
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Welcome text
-                _animated(
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Welcome back', style: AppTextStyles.headingLarge),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Sign in to continue.',
-                        style: AppTextStyles.bodyMedium
-                            .copyWith(color: AppColors.kTextSecondary),
-                      ),
-                    ],
-                  ),
-                  0.1,
+      body: Stack(
+        children: [
+          // ── Ambient background glows ──────────────────────────────────────
+          Positioned(
+            top: -130,
+            right: -90,
+            child: Container(
+              width: 380,
+              height: 380,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    AppColors.kPrimary.withValues(alpha: 0.18),
+                    Colors.transparent,
+                  ],
                 ),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -80,
+            left: -70,
+            child: Container(
+              width: 270,
+              height: 270,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    AppColors.kSecondary.withValues(alpha: 0.11),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
 
-                const SizedBox(height: 32),
+          // ── Content ───────────────────────────────────────────────────────
+          SafeArea(
+            child: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 52),
 
-                // Form
-                _animated(
-                  Form(
-                    key: _formKey,
-                    child: Column(
+                  // Brand eyebrow
+                  _animated(_buildEyebrow(), 0.0),
+
+                  const SizedBox(height: 28),
+
+                  // Hero headline
+                  _animated(_buildHeadline(), 0.08),
+
+                  const SizedBox(height: 40),
+
+                  // Form
+                  _animated(_buildForm(), 0.18),
+
+                  const SizedBox(height: 20),
+
+                  // Error banner — animates its own size so layout doesn't jump
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 280),
+                    curve: Curves.easeOut,
+                    child: _errorMessage != null
+                        ? Padding(
+                            padding: const EdgeInsets.only(bottom: 14),
+                            child: _buildErrorBanner(),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+
+                  // Sign In CTA
+                  _animated(
+                    OrbitButton(label: 'Sign In', onTap: _login, isLoading: _isLoading),
+                    0.26,
+                  ),
+
+                  const SizedBox(height: 32),
+
+                  // Divider
+                  _animated(_buildOrDivider(), 0.32),
+
+                  const SizedBox(height: 20),
+
+                  // Social buttons
+                  _animated(
+                    Column(
                       children: [
-                        AuthTextField(
-                          controller: _emailCtrl,
-                          label: 'Email address',
-                          prefixIcon: Icons.email_outlined,
-                          keyboardType: TextInputType.emailAddress,
-                          textInputAction: TextInputAction.next,
-                          validator: (v) {
-                            if (v == null || v.trim().isEmpty) {
-                              return 'Email is required';
-                            }
-                            if (!RegExp(r'^[\w-.]+@([\w-]+\.)+[\w-]{2,}$')
-                                .hasMatch(v.trim())) {
-                              return 'Enter a valid email address';
-                            }
-                            return null;
-                          },
+                        SocialLoginButton.google(
+                          onTap: _isLoading ? null : _loginWithGoogle,
+                          isLoading: _isGoogleLoading,
                         ),
-                        const SizedBox(height: 16),
-                        AuthTextField(
-                          controller: _passCtrl,
-                          label: 'Password',
-                          prefixIcon: Icons.lock_outline_rounded,
-                          isPassword: true,
-                          textInputAction: TextInputAction.done,
-                          onFieldSubmitted: (_) => _login(),
-                          validator: (v) {
-                            if (v == null || v.isEmpty) {
-                              return 'Password is required';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton(
-                            onPressed: () =>
-                                context.push('/auth/forgot-password'),
-                            style: TextButton.styleFrom(
-                              padding: EdgeInsets.zero,
-                              minimumSize: const Size(0, 36),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            child: Text(
-                              'Forgot password?',
-                              style: AppTextStyles.bodySmall.copyWith(
-                                color: AppColors.kPrimary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
+                        const SizedBox(height: AppSpacing.md),
+                        SocialLoginButton.apple(
+                          onTap: _isLoading ? null : () {},
                         ),
                       ],
                     ),
+                    0.38,
                   ),
-                  0.2,
-                ),
 
-                const SizedBox(height: 24),
+                  const SizedBox(height: 48),
 
-                // Error banner
-                _animated(_buildErrorBanner(), 0.0),
+                  // Footer
+                  _animated(_buildFooter(), 0.44),
 
-                if (_errorMessage != null) const SizedBox(height: 8),
-
-                // Sign in button
-                _animated(
-                  OrbitButton(
-                    label: 'Sign In',
-                    onTap: _login,
-                    isLoading: _isLoading,
-                  ),
-                  0.3,
-                ),
-
-                const SizedBox(height: 28),
-
-                // Divider "or"
-                _animated(
-                  Row(
-                    children: [
-                      const Expanded(child: Divider(color: AppColors.kBorder)),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.md,
-                        ),
-                        child: Text(
-                          'or',
-                          style: AppTextStyles.caption
-                              .copyWith(color: AppColors.kTextSecondary),
-                        ),
-                      ),
-                      const Expanded(child: Divider(color: AppColors.kBorder)),
-                    ],
-                  ),
-                  0.35,
-                ),
-
-                const SizedBox(height: 24),
-
-                // Social buttons — full-width stacked (standard mobile pattern)
-                _animated(
-                  Column(
-                    children: [
-                      SocialLoginButton.google(
-                        onTap: _isLoading ? null : _loginWithGoogle,
-                        isLoading: _isGoogleLoading,
-                      ),
-                      const SizedBox(height: 12),
-                      SocialLoginButton.apple(
-                        onTap: _isLoading ? null : () {},
-                      ),
-                    ],
-                  ),
-                  0.4,
-                ),
-
-                const SizedBox(height: 40),
-
-                // Sign up link
-                _animated(
-                  Center(
-                    child: RichText(
-                      text: TextSpan(
-                        text: "Don't have an account? ",
-                        style: AppTextStyles.bodySmall
-                            .copyWith(color: AppColors.kTextSecondary),
-                        children: [
-                          TextSpan(
-                            text: 'Sign up',
-                            style: AppTextStyles.bodySmall.copyWith(
-                              color: AppColors.kPrimary,
-                              fontWeight: FontWeight.w700,
-                            ),
-                            recognizer: TapGestureRecognizer()
-                              ..onTap = () => context.go('/auth/signup'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  0.45,
-                ),
-              ],
+                  const SizedBox(height: 24),
+                ],
+              ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sub-widgets
+  // ---------------------------------------------------------------------------
+
+  /// Small brand label + context tag at the very top.
+  Widget _buildEyebrow() {
+    return Row(
+      children: [
+        ShaderMask(
+          shaderCallback: (bounds) => const LinearGradient(
+            colors: AppColors.kGradientPrimary,
+          ).createShader(bounds),
+          child: Text(
+            'ORBIT',
+            style: AppTextStyles.labelSmall.copyWith(
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 3.5,
+              color: Colors.white, // required for ShaderMask
+            ),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm + 2),
+        Container(
+          width: 3,
+          height: 3,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: AppColors.kSecondary,
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm + 2),
+        Text(
+          'Sign in to continue',
+          style: AppTextStyles.labelSmall.copyWith(
+            fontSize: 11,
+            color: AppColors.kTextDisabled,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Two-line editorial headline — "Welcome" in white, "back." in gradient.
+  Widget _buildHeadline() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Welcome',
+          style: AppTextStyles.displayMedium.copyWith(
+            fontSize: 38,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -1.2,
+            height: 1.05,
+            color: AppColors.kTextPrimary,
+          ),
+        ),
+        ShaderMask(
+          shaderCallback: (bounds) => const LinearGradient(
+            colors: AppColors.kGradientPrimary,
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+          ).createShader(bounds),
+          child: Text(
+            'back.',
+            style: AppTextStyles.displayMedium.copyWith(
+              fontSize: 38,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -1.2,
+              height: 1.05,
+              color: Colors.white, // required for ShaderMask
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Text(
+          'Your flashcards and streaks are\nwaiting for you.',
+          style: AppTextStyles.bodyMedium.copyWith(
+            color: AppColors.kTextSecondary,
+            height: 1.65,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildForm() {
+    return Form(
+      key: _formKey,
+      child: Column(
+        children: [
+          AuthTextField(
+            controller: _emailCtrl,
+            label: 'Email address',
+            prefixIcon: Icons.email_outlined,
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.next,
+            validator: (v) {
+              if (v == null || v.trim().isEmpty) return 'Email is required';
+              if (!RegExp(r'^[\w-.]+@([\w-]+\.)+[\w-]{2,}$').hasMatch(v.trim())) {
+                return 'Enter a valid email address';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 14),
+          AuthTextField(
+            controller: _passCtrl,
+            label: 'Password',
+            prefixIcon: Icons.lock_outline_rounded,
+            isPassword: true,
+            textInputAction: TextInputAction.done,
+            onFieldSubmitted: (_) => _login(),
+            validator: (v) {
+              if (v == null || v.isEmpty) return 'Password is required';
+              return null;
+            },
+          ),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () => context.push('/auth/forgot-password'),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                'Forgot password?',
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.kPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.kErrorContainer,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.kError.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded, color: AppColors.kError, size: 16),
+          const SizedBox(width: AppSpacing.sm + 2),
+          Expanded(
+            child: Text(
+              _errorMessage!,
+              style: AppTextStyles.bodySmall.copyWith(color: AppColors.kError),
+            ),
+          ),
+          GestureDetector(
+            onTap: () => setState(() => _errorMessage = null),
+            child: const Icon(Icons.close_rounded, color: AppColors.kError, size: 16),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Gradient-fade divider with centred label.
+  Widget _buildOrDivider() {
+    return Row(
+      children: [
+        Expanded(
+          child: Container(
+            height: 1,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.transparent, AppColors.kBorder],
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+          child: Text(
+            'or continue with',
+            style: AppTextStyles.caption.copyWith(
+              color: AppColors.kTextDisabled,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Container(
+            height: 1,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [AppColors.kBorder, Colors.transparent],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFooter() {
+    return Center(
+      child: RichText(
+        text: TextSpan(
+          text: 'New to Orbit?  ',
+          style: AppTextStyles.bodySmall.copyWith(color: AppColors.kTextSecondary),
+          children: [
+            TextSpan(
+              text: 'Create account →',
+              style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.kPrimary,
+                fontWeight: FontWeight.w700,
+              ),
+              recognizer: TapGestureRecognizer()
+                ..onTap = () => context.go('/auth/signup'),
+            ),
+          ],
         ),
       ),
     );

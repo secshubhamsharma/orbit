@@ -4,124 +4,170 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
 
+/// Full-width social authentication button.
+///
+/// Usage:
+///   SocialLoginButton.google(onTap: _loginWithGoogle, isLoading: _isLoading)
+///   SocialLoginButton.apple(onTap: _loginWithApple)
 class SocialLoginButton extends StatelessWidget {
-  const SocialLoginButton({
-    super.key,
-    required this.label,
-    required this.icon,
-    this.onTap,
-    this.isLoading = false,
-    this.backgroundColor,
-    this.textColor,
-  });
-
-  final String label;
-  final Widget icon;
+  final String _label;
+  final Widget _leadingIcon;
   final VoidCallback? onTap;
   final bool isLoading;
-  final Color? backgroundColor;
-  final Color? textColor;
 
-  // ---------------------------------------------------------------------------
-  // Factory constructors
-  // ---------------------------------------------------------------------------
+  const SocialLoginButton._({
+    required String label,
+    required Widget leadingIcon,
+    this.onTap,
+    this.isLoading = false,
+  })  : _label = label,
+        _leadingIcon = leadingIcon;
 
   factory SocialLoginButton.google({
     VoidCallback? onTap,
     bool isLoading = false,
-  }) {
-    return SocialLoginButton(
-      label: 'Continue with Google',
-      icon: Container(
-        width: 24,
-        height: 24,
-        decoration: const BoxDecoration(
-          color: Color(0xFF4285F4),
-          shape: BoxShape.circle,
-        ),
-        alignment: Alignment.center,
-        child: const Text(
-          'G',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
-            height: 1,
-          ),
-        ),
-      ),
-      onTap: onTap,
-      isLoading: isLoading,
-      backgroundColor: AppColors.kSurfaceHigh,
-    );
-  }
+  }) =>
+      SocialLoginButton._(
+        label: 'Continue with Google',
+        leadingIcon: const _GoogleIcon(),
+        onTap: onTap,
+        isLoading: isLoading,
+      );
 
   factory SocialLoginButton.apple({
     VoidCallback? onTap,
     bool isLoading = false,
-  }) {
-    return SocialLoginButton(
-      label: 'Continue with Apple',
-      icon: const Icon(
-        Icons.apple,
-        size: 22,
-        color: AppColors.kTextPrimary,
-      ),
-      onTap: onTap,
-      isLoading: isLoading,
-      backgroundColor: AppColors.kSurfaceHigh,
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
+  }) =>
+      SocialLoginButton._(
+        label: 'Continue with Apple',
+        leadingIcon: const _AppleIcon(),
+        onTap: onTap,
+        isLoading: isLoading,
+      );
 
   @override
   Widget build(BuildContext context) {
-    final bg = backgroundColor ?? AppColors.kSurfaceVariant;
-    final fg = textColor ?? AppColors.kTextPrimary;
+    final enabled = onTap != null && !isLoading;
 
-    return Material(
-      color: bg,
-      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-      child: InkWell(
-        onTap: isLoading ? null : onTap,
-        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-        splashColor: AppColors.kPrimary.withValues(alpha: 0.08),
-        highlightColor: AppColors.kPrimary.withValues(alpha: 0.04),
-        child: Container(
-          height: 52,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            border: Border.all(color: AppColors.kBorder, width: 1),
+    return SizedBox(
+      height: 56,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          // Subtle top-to-bottom gradient gives a glassy depth feel
+          gradient: const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [AppColors.kSurfaceHigh, AppColors.kSurfaceVariant],
           ),
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-          child: isLoading
-              ? const Center(
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        AppColors.kPrimary,
-                      ),
-                    ),
-                  ),
-                )
-              : Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    icon,
-                    const SizedBox(width: AppSpacing.sm),
-                    Text(
-                      label,
-                      style: AppTextStyles.labelLarge.copyWith(color: fg),
-                    ),
-                  ],
-                ),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+          border: Border.all(color: AppColors.kBorder),
         ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: enabled ? onTap : null,
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+            splashColor: AppColors.kPrimary.withValues(alpha: 0.06),
+            highlightColor: AppColors.kPrimary.withValues(alpha: 0.03),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+              child: isLoading
+                  ? const Center(
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.kTextSecondary,
+                        ),
+                      ),
+                    )
+                  : Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // Icon pinned to left
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: _leadingIcon,
+                        ),
+                        // Label always centred regardless of icon width
+                        Text(
+                          _label,
+                          style: AppTextStyles.labelMedium.copyWith(
+                            color: AppColors.kTextPrimary,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.1,
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Icon widgets
+// ---------------------------------------------------------------------------
+
+/// Google "G" — white rounded-square with Google-blue bold G.
+class _GoogleIcon extends StatelessWidget {
+  const _GoogleIcon();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 26,
+      height: 26,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(7),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.14),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      alignment: Alignment.center,
+      child: const Text(
+        'G',
+        style: TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF4285F4),
+          height: 1,
+        ),
+      ),
+    );
+  }
+}
+
+/// Apple icon — subtle dark pill with the SF-style apple glyph.
+class _AppleIcon extends StatelessWidget {
+  const _AppleIcon();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 26,
+      height: 26,
+      decoration: BoxDecoration(
+        color: AppColors.kSurfaceVariant,
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(
+          color: AppColors.kBorder.withValues(alpha: 0.6),
+        ),
+      ),
+      alignment: Alignment.center,
+      child: const Icon(
+        Icons.apple,
+        size: 17,
+        color: Colors.white,
       ),
     );
   }
