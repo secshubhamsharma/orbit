@@ -241,21 +241,38 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Welcome back.',
+          'Welcome',
           style: AppTextStyles.displayMedium.copyWith(
-            fontSize: 36,
+            fontSize: 38,
             fontWeight: FontWeight.w800,
-            letterSpacing: -0.8,
-            height: 1.1,
+            letterSpacing: -1.2,
+            height: 1.05,
             color: AppColors.kTextPrimary,
           ),
         ),
-        const SizedBox(height: 10),
+        ShaderMask(
+          shaderCallback: (bounds) => const LinearGradient(
+            colors: AppColors.kGradientPrimary,
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+          ).createShader(bounds),
+          child: Text(
+            'back.',
+            style: AppTextStyles.displayMedium.copyWith(
+              fontSize: 38,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -1.2,
+              height: 1.05,
+              color: Colors.white,
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
         Text(
-          'Your flashcards and streaks\nare waiting for you.',
+          'Your flashcards and streaks are\nwaiting for you.',
           style: AppTextStyles.bodyMedium.copyWith(
             color: AppColors.kTextSecondary,
-            height: 1.6,
+            height: 1.65,
           ),
         ),
       ],

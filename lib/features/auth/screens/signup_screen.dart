@@ -265,21 +265,38 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Create your account.',
+          'Start your',
           style: AppTextStyles.displayMedium.copyWith(
-            fontSize: 34,
+            fontSize: 36,
             fontWeight: FontWeight.w800,
-            letterSpacing: -0.8,
-            height: 1.1,
+            letterSpacing: -1.0,
+            height: 1.05,
             color: AppColors.kTextPrimary,
           ),
         ),
-        const SizedBox(height: 10),
+        ShaderMask(
+          shaderCallback: (bounds) => const LinearGradient(
+            colors: AppColors.kGradientPrimary,
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+          ).createShader(bounds),
+          child: Text(
+            'journey.',
+            style: AppTextStyles.displayMedium.copyWith(
+              fontSize: 36,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -1.0,
+              height: 1.05,
+              color: Colors.white,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
         Text(
-          'Join thousands learning smarter\nwith AI-powered flashcards.',
+          'Join thousands of learners mastering\nmore in less time.',
           style: AppTextStyles.bodyMedium.copyWith(
             color: AppColors.kTextSecondary,
-            height: 1.6,
+            height: 1.65,
           ),
         ),
       ],
