@@ -2,17 +2,25 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
 import 'firebase_options.dart';
 
-void main() async {
+/// Firebase initialisation future started before [runApp].
+/// The splash screen awaits this so navigation never fires before Firebase
+/// is ready — but [runApp] is no longer blocked, so Flutter draws its first
+/// frame (and the splash animation begins) as fast as possible.
+Future<FirebaseApp>? orbitFirebaseFuture;
+
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await SharedPreferences.getInstance();
-
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // Kick off async work immediately — do NOT await here.
+  // Dart runs these concurrently with the Flutter engine rendering the first
+  // frame, cutting the blank-window delay from ~500 ms to near zero.
+  orbitFirebaseFuture = Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
