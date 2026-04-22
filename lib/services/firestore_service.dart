@@ -1,8 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:orbitapp/models/app_config_model.dart';
 import 'package:orbitapp/models/card_schedule_model.dart';
 import 'package:orbitapp/models/domain_model.dart';
 import 'package:orbitapp/models/flashcard_model.dart';
+import 'package:orbitapp/models/leaderboard_model.dart';
+import 'package:orbitapp/models/pdf_upload_model.dart';
 import 'package:orbitapp/models/progress_model.dart';
 import 'package:orbitapp/models/review_session_model.dart';
 import 'package:orbitapp/models/subject_model.dart';
@@ -262,5 +265,104 @@ class FirestoreService {
     return snap.docs
         .map((d) => ProgressModel.fromJson(_clean(d.data())))
         .toList();
+  }
+
+  // ---------------------------------------------------------------------------
+  // PDF Uploads
+  // ---------------------------------------------------------------------------
+
+  Future<void> createUpload(PdfUploadModel upload) async {
+    await _db
+        .collection('uploads')
+        .doc(upload.id)
+        .set(upload.toJson(), SetOptions(merge: true));
+  }
+
+  Future<void> updateUploadStatus(
+      String uploadId, String status, {String? error, int? cardCount}) async {
+    final fields = <String, dynamic>{'status': status};
+    if (error != null) fields['error'] = error;
+    if (cardCount != null) fields['generatedCardCount'] = cardCount;
+    if (status == 'completed') {
+      fields['completedAt'] = FieldValue.serverTimestamp();
+    }
+    await _db.collection('uploads').doc(uploadId).update(fields);
+  }
+
+  Future<PdfUploadModel?> getUpload(String uploadId) async {
+    final snap = await _db.collection('uploads').doc(uploadId).get();
+    if (!snap.exists || snap.data() == null) return null;
+    return PdfUploadModel.fromJson(_clean(snap.data()!));
+  }
+
+  Stream<PdfUploadModel?> uploadStream(String uploadId) {
+    return _db.collection('uploads').doc(uploadId).snapshots().map((snap) {
+      if (!snap.exists || snap.data() == null) return null;
+      return PdfUploadModel.fromJson(_clean(snap.data()!));
+    });
+  }
+
+  Future<List<PdfUploadModel>> getUserUploads(String userId) async {
+    final snap = await _db
+        .collection('uploads')
+        .where('userId', isEqualTo: userId)
+        .orderBy('uploadedAt', descending: true)
+        .get();
+    return snap.docs
+        .map((d) => PdfUploadModel.fromJson(_clean(d.data())))
+        .toList();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Leaderboard
+  // ---------------------------------------------------------------------------
+
+  Future<List<LeaderboardEntryModel>> getWeeklyLeaderboard(
+      String weekId, {int limit = 50}) async {
+    final snap = await _db
+        .collection('leaderboard')
+        .doc('weekly')
+        .collection(weekId)
+        .orderBy('rank')
+        .limit(limit)
+        .get();
+    return snap.docs
+        .map((d) => LeaderboardEntryModel.fromJson(_clean(d.data())))
+        .toList();
+  }
+
+  Future<LeaderboardEntryModel?> getUserLeaderboardEntry(
+      String weekId, String userId) async {
+    final snap = await _db
+        .collection('leaderboard')
+        .doc('weekly')
+        .collection(weekId)
+        .doc(userId)
+        .get();
+    if (!snap.exists || snap.data() == null) return null;
+    return LeaderboardEntryModel.fromJson(_clean(snap.data()!));
+  }
+
+  // ---------------------------------------------------------------------------
+  // App Config
+  // ---------------------------------------------------------------------------
+
+  Future<AppConfigModel> getAppConfig() async {
+    try {
+      final snap =
+          await _db.collection('appConfig').doc('global').get();
+      if (!snap.exists || snap.data() == null) return const AppConfigModel();
+      return AppConfigModel.fromJson(_clean(snap.data()!));
+    } catch (_) {
+      // Return safe defaults if the doc doesn't exist yet.
+      return const AppConfigModel();
+    }
+  }
+
+  Stream<AppConfigModel> appConfigStream() {
+    return _db.collection('appConfig').doc('global').snapshots().map((snap) {
+      if (!snap.exists || snap.data() == null) return const AppConfigModel();
+      return AppConfigModel.fromJson(_clean(snap.data()!));
+    });
   }
 }
