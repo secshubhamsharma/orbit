@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
+import '../../../main.dart' show orbitFirebaseFuture;
 
 // ─── Splash Screen ────────────────────────────────────────────────────────────
 
@@ -122,15 +123,18 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _navigate() async {
-    // Run prefs read and minimum display timer in parallel.
+    // Await Firebase init, prefs, and minimum display timer — all in parallel.
+    // Firebase was already kicked off in main() so it has a head-start; this
+    // just ensures we don't navigate before it finishes.
     final results = await Future.wait<dynamic>([
+      orbitFirebaseFuture!,
       SharedPreferences.getInstance(),
       Future<void>.delayed(const Duration(milliseconds: 2400)),
     ]);
 
     if (!mounted) return;
 
-    final prefs           = results[0] as SharedPreferences;
+    final prefs           = results[1] as SharedPreferences;
     final onboardingDone  = prefs.getBool('onboarding_done') ?? false;
     final user            = FirebaseAuth.instance.currentUser;
 
