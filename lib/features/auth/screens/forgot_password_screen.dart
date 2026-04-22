@@ -96,42 +96,6 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen>
   // Reusable sub-widgets
   // ---------------------------------------------------------------------------
 
-  Widget _buildLogoMark() {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: AppColors.kGradientPrimary,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(9),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.kPrimary.withValues(alpha: 0.4),
-                blurRadius: 10,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          child: const Icon(Icons.public_rounded, size: 18, color: Colors.white),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          'ORBIT',
-          style: AppTextStyles.headingSmall.copyWith(
-            letterSpacing: 3,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildErrorBanner() {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
@@ -193,25 +157,23 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Back button + logo row
-                Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(
-                        Icons.arrow_back_ios_new_rounded,
-                        size: 20,
-                        color: AppColors.kTextPrimary,
-                      ),
-                      onPressed: () => context.pop(),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
+                // Back button
+                GestureDetector(
+                  onTap: () => context.pop(),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: AppColors.kSurface,
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                      border: Border.all(color: AppColors.kBorder),
                     ),
-                    const Spacer(),
-                    _buildLogoMark(),
-                    const Spacer(),
-                    // Invisible placeholder to centre the logo
-                    const SizedBox(width: 40),
-                  ],
+                    child: const Icon(
+                      Icons.arrow_back_ios_new_rounded,
+                      size: 15,
+                      color: AppColors.kTextPrimary,
+                    ),
+                  ),
                 ),
 
                 const SizedBox(height: 40),
