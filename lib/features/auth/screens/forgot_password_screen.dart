@@ -149,34 +149,35 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.kBackground,
-      body: SingleChildScrollView(
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Back button
-                GestureDetector(
-                  onTap: () => context.pop(),
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: AppColors.kSurface,
-                      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                      border: Border.all(color: AppColors.kBorder),
-                    ),
-                    child: const Icon(
-                      Icons.arrow_back_ios_new_rounded,
-                      size: 15,
-                      color: AppColors.kTextPrimary,
-                    ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 16),
+
+              // Back button — matches signup screen style exactly
+              GestureDetector(
+                onTap: () => context.pop(),
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppColors.kSurface,
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                    border: Border.all(color: AppColors.kBorder),
+                  ),
+                  child: const Icon(
+                    Icons.arrow_back_ios_new_rounded,
+                    size: 15,
+                    color: AppColors.kTextPrimary,
                   ),
                 ),
+              ),
 
-                const SizedBox(height: 40),
+              const SizedBox(height: 40),
 
                 // Animated switcher between input and success states
                 AnimatedSwitcher(
@@ -210,8 +211,8 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen>
                           animatedWrapper: _animated,
                         ),
                 ),
-              ],
-            ),
+              const SizedBox(height: 32),
+            ],
           ),
         ),
       ),
