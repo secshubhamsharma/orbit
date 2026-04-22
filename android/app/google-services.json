@@ -12,7 +12,12 @@
           "package_name": "com.orbit.app.orbitapp"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "138787937708-d7gavparvq1saqro1n9mqv18nd2kkuge.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDfOjfyY5kUG8e8aCHaDg8rmgQpStFjwsE"
@@ -20,7 +25,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "138787937708-d7gavparvq1saqro1n9mqv18nd2kkuge.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "138787937708-2c59fpa3sa5ce0p1p7g5kq95a8nnh466.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.orbit.app.orbitapp"
+              }
+            }
+          ]
         }
       }
     }

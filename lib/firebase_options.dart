@@ -49,6 +49,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '138787937708',
     projectId: 'orbitapp-4e44f',
     storageBucket: 'orbitapp-4e44f.firebasestorage.app',
+    iosClientId: '138787937708-2c59fpa3sa5ce0p1p7g5kq95a8nnh466.apps.googleusercontent.com',
     iosBundleId: 'com.orbit.app.orbitapp',
   );
 
