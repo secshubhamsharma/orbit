@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import '../core/errors/app_exception.dart';
@@ -66,17 +67,29 @@ class AuthService {
 
   Future<UserCredential?> signInWithGoogle() async {
     try {
+      await _googleSignIn.signOut();
       final googleAccount = await _googleSignIn.signIn();
       if (googleAccount == null) {
-        // User cancelled the picker.
         return null;
       }
+
       final googleAuth = await googleAccount.authentication;
+      if (googleAuth.idToken == null || googleAuth.idToken!.isEmpty) {
+        throw const AuthException(
+          'Google sign-in is not configured correctly for this app yet. '
+          'Please check the Firebase OAuth setup and try again.',
+          code: 'google-id-token-missing',
+        );
+      }
+
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
+
       return await _auth.signInWithCredential(credential);
+    } on PlatformException catch (e) {
+      throw _mapGooglePlatformError(e);
     } on FirebaseAuthException catch (e) {
       throw _mapError(e);
     } catch (e) {
@@ -153,5 +166,40 @@ class AuthService {
       _ => 'Something went wrong. Please try again.',
     };
     return AuthException(message, code: e.code);
+  }
+
+  AuthException _mapGooglePlatformError(PlatformException e) {
+    final code = e.code.toLowerCase();
+    final details = '${e.message ?? ''} ${e.details ?? ''}'.toLowerCase();
+
+    if (code.contains('sign_in_canceled') || code.contains('canceled')) {
+      return const AuthException(
+        'Google sign-in was cancelled.',
+        code: 'google-sign-in-cancelled',
+      );
+    }
+
+    if (details.contains('10') ||
+        details.contains('developer_error') ||
+        details.contains('config') ||
+        details.contains('oauth')) {
+      return const AuthException(
+        'Google sign-in is not configured correctly for this app yet. '
+        'Please add the required Firebase OAuth client and SHA fingerprints.',
+        code: 'google-sign-in-misconfigured',
+      );
+    }
+
+    if (code.contains('network') || details.contains('network')) {
+      return const AuthException(
+        'Network error while signing in with Google. Please try again.',
+        code: 'google-sign-in-network',
+      );
+    }
+
+    return AuthException(
+      e.message ?? 'Google sign-in failed. Please try again.',
+      code: e.code,
+    );
   }
 }
