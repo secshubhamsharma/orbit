@@ -50,58 +50,50 @@ class SocialLoginButton extends StatelessWidget {
     final enabled = onTap != null && !isLoading;
 
     return SizedBox(
-      height: 56,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          // Subtle top-to-bottom gradient gives a glassy depth feel
-          gradient: const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [AppColors.kSurfaceHigh, AppColors.kSurfaceVariant],
-          ),
+      height: 54,
+      child: Material(
+        color: AppColors.kSurface,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        child: InkWell(
+          onTap: enabled ? onTap : null,
           borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-          border: Border.all(color: AppColors.kBorder),
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: enabled ? onTap : null,
-            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            splashColor: AppColors.kPrimary.withValues(alpha: 0.06),
-            highlightColor: AppColors.kPrimary.withValues(alpha: 0.03),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
-              child: isLoading
-                  ? const Center(
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppColors.kTextSecondary,
+          splashColor: AppColors.kPrimary.withValues(alpha: 0.06),
+          highlightColor: AppColors.kPrimary.withValues(alpha: 0.03),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+              border: Border.all(color: AppColors.kBorder),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+            child: isLoading
+                ? const Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.kTextSecondary,
+                      ),
+                    ),
+                  )
+                : Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Icon stays pinned to the left
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: _leadingIcon,
+                      ),
+                      // Label is always optically centred
+                      Text(
+                        _label,
+                        style: AppTextStyles.labelMedium.copyWith(
+                          color: AppColors.kTextPrimary,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
-                    )
-                  : Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        // Icon pinned to left
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: _leadingIcon,
-                        ),
-                        // Label always centred regardless of icon width
-                        Text(
-                          _label,
-                          style: AppTextStyles.labelMedium.copyWith(
-                            color: AppColors.kTextPrimary,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.1,
-                          ),
-                        ),
-                      ],
-                    ),
-            ),
+                    ],
+                  ),
           ),
         ),
       ),
@@ -113,7 +105,7 @@ class SocialLoginButton extends StatelessWidget {
 // Icon widgets
 // ---------------------------------------------------------------------------
 
-/// Google "G" — white rounded-square with Google-blue bold G.
+/// White rounded square with Google-blue bold "G".
 class _GoogleIcon extends StatelessWidget {
   const _GoogleIcon();
 
@@ -124,14 +116,7 @@ class _GoogleIcon extends StatelessWidget {
       height: 26,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(7),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.14),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(6),
       ),
       alignment: Alignment.center,
       child: const Text(
@@ -147,7 +132,7 @@ class _GoogleIcon extends StatelessWidget {
   }
 }
 
-/// Apple icon — subtle dark pill with the SF-style apple glyph.
+/// Dark square matching the surface with the Apple glyph in white.
 class _AppleIcon extends StatelessWidget {
   const _AppleIcon();
 
@@ -158,17 +143,11 @@ class _AppleIcon extends StatelessWidget {
       height: 26,
       decoration: BoxDecoration(
         color: AppColors.kSurfaceVariant,
-        borderRadius: BorderRadius.circular(7),
-        border: Border.all(
-          color: AppColors.kBorder.withValues(alpha: 0.6),
-        ),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: AppColors.kBorder),
       ),
       alignment: Alignment.center,
-      child: const Icon(
-        Icons.apple,
-        size: 17,
-        color: Colors.white,
-      ),
+      child: const Icon(Icons.apple, size: 17, color: Colors.white),
     );
   }
 }
