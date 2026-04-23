@@ -21,36 +21,40 @@ class OrbitBottomNav extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final current = navigationShell.currentIndex;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.kSurface : AppColors.kSurfaceLight,
-        border: Border(
-          top: BorderSide(
-            color: isDark ? AppColors.kBorder : AppColors.kBorderLight,
-            width: 1,
+    return Scaffold(
+      backgroundColor: AppColors.kBackground,
+      body: navigationShell,
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.kSurface : AppColors.kSurfaceLight,
+          border: Border(
+            top: BorderSide(
+              color: isDark ? AppColors.kBorder : AppColors.kBorderLight,
+              width: 1,
+            ),
           ),
         ),
-      ),
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: 60,
-          child: Row(
-            children: List.generate(_tabs.length, (i) {
-              final tab = _tabs[i];
-              final isActive = current == i;
-              return Expanded(
-                child: _NavItem(
-                  icon: tab.icon,
-                  label: tab.label,
-                  isActive: isActive,
-                  onTap: () => navigationShell.goBranch(
-                    i,
-                    initialLocation: i == current,
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 60,
+            child: Row(
+              children: List.generate(_tabs.length, (i) {
+                final tab = _tabs[i];
+                final isActive = current == i;
+                return Expanded(
+                  child: _NavItem(
+                    icon: tab.icon,
+                    label: tab.label,
+                    isActive: isActive,
+                    onTap: () => navigationShell.goBranch(
+                      i,
+                      initialLocation: i == current,
+                    ),
                   ),
-                ),
-              );
-            }),
+                );
+              }),
+            ),
           ),
         ),
       ),
