@@ -12,6 +12,8 @@ import '../../features/library/screens/library_screen.dart';
 import '../../features/library/screens/domain_screen.dart';
 import '../../features/library/screens/subject_screen.dart';
 import '../../features/library/screens/topic_screen.dart';
+import '../../features/library/screens/book_screen.dart';
+import '../../features/library/screens/chapter_screen.dart';
 import '../../features/search/screens/search_screen.dart';
 import '../../features/progress/screens/progress_screen.dart';
 import '../../features/progress/screens/topic_detail_screen.dart';
@@ -104,13 +106,25 @@ final appRouter = GoRouter(
                     ),
                     routes: [
                       GoRoute(
-                        path: ':topicId',
-                        name: RouteNames.topic,
-                        builder: (context, state) => TopicScreen(
+                        path: ':bookId',
+                        name: RouteNames.book,
+                        builder: (context, state) => BookScreen(
                           domainId: state.pathParameters['domainId']!,
                           subjectId: state.pathParameters['subjectId']!,
-                          topicId: state.pathParameters['topicId']!,
+                          bookId: state.pathParameters['bookId']!,
                         ),
+                        routes: [
+                          GoRoute(
+                            path: ':chapterId',
+                            name: RouteNames.chapter,
+                            builder: (context, state) => ChapterScreen(
+                              domainId: state.pathParameters['domainId']!,
+                              subjectId: state.pathParameters['subjectId']!,
+                              bookId: state.pathParameters['bookId']!,
+                              chapterId: state.pathParameters['chapterId']!,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
