@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:orbitapp/core/constants/app_colors.dart';
 import 'package:orbitapp/core/constants/app_spacing.dart';
 import 'package:orbitapp/core/constants/app_text_styles.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:orbitapp/models/user_model.dart';
 import 'package:orbitapp/providers/progress_provider.dart';
 import 'package:orbitapp/providers/user_provider.dart';
@@ -62,9 +63,16 @@ class _ProfileHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = user?.displayName ?? 'User';
-    final email = user?.email ?? '';
-    final photoUrl = user?.photoUrl;
+    // Fall back to Firebase Auth if Firestore doc fields are empty
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+    final fsName = user?.displayName ?? '';
+    final name = fsName.isNotEmpty ? fsName : (firebaseUser?.displayName ?? 'User');
+
+    final fsEmail = user?.email ?? '';
+    final email = fsEmail.isNotEmpty ? fsEmail : (firebaseUser?.email ?? '');
+
+    final fsPhoto = user?.photoUrl ?? '';
+    final photoUrl = fsPhoto.isNotEmpty ? fsPhoto : firebaseUser?.photoURL;
     final createdAt = user?.createdAt;
 
     return Container(
