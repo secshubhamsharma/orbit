@@ -1,4 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -87,7 +88,10 @@ class _GreetingHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = userAsync.valueOrNull?.displayName.split(' ').first ?? '';
+    final fsName = userAsync.valueOrNull?.displayName ?? '';
+    final authName = FirebaseAuth.instance.currentUser?.displayName ?? '';
+    final resolvedName = fsName.isNotEmpty ? fsName : authName;
+    final name = resolvedName.split(' ').first;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -129,30 +133,33 @@ class _Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final photoUrl = user?.photoUrl;
-    final initials = _initials(user?.displayName ?? '');
+    // Priority: Firestore photoUrl → Firebase Auth photoURL → initials fallback.
+    // This matches the same resolution chain used in ProfileScreen and EditProfileScreen.
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+    final fsPhoto = user?.photoUrl ?? '';
+    final photoUrl = fsPhoto.isNotEmpty ? fsPhoto : firebaseUser?.photoURL;
 
-    if (photoUrl != null && photoUrl.isNotEmpty) {
-      return GestureDetector(
-        onTap: () => context.go('/home/profile'),
-        child: CircleAvatar(
-          radius: 22,
-          backgroundImage: CachedNetworkImageProvider(photoUrl),
-          backgroundColor: AppColors.kSurfaceVariant,
-        ),
-      );
-    }
+    final fsName = user?.displayName ?? '';
+    final name = fsName.isNotEmpty ? fsName : (firebaseUser?.displayName ?? '');
+    final initials = _initials(name);
 
     return GestureDetector(
       onTap: () => context.go('/home/profile'),
-      child: CircleAvatar(
-        radius: 22,
-        backgroundColor: AppColors.kPrimaryContainer,
-        child: Text(
-          initials,
-          style: AppTextStyles.labelMedium.copyWith(color: AppColors.kPrimary),
-        ),
-      ),
+      child: photoUrl != null && photoUrl.isNotEmpty
+          ? CircleAvatar(
+              radius: 22,
+              backgroundColor: AppColors.kSurfaceVariant,
+              backgroundImage: CachedNetworkImageProvider(photoUrl),
+            )
+          : CircleAvatar(
+              radius: 22,
+              backgroundColor: AppColors.kPrimaryContainer,
+              child: Text(
+                initials,
+                style: AppTextStyles.labelMedium
+                    .copyWith(color: AppColors.kPrimary),
+              ),
+            ),
     );
   }
 
