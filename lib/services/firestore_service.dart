@@ -38,6 +38,26 @@ class FirestoreService {
     });
   }
 
+  /// Cleans and fills in safe defaults for every non-nullable [UserModel]
+  /// field. Prevents "null is not a subtype of String" when a document was
+  /// created by a partial merge or when required fields are explicitly null.
+  ///
+  /// Strategy: spread Firestore values first so optional fields (e.g.
+  /// photoUrl: null) are preserved, then force-apply null-safe values for
+  /// the five required non-nullable fields so they can never be null.
+  Map<String, dynamic> _sanitizeUser(Map<String, dynamic> raw) {
+    final now = DateTime.now().toIso8601String();
+    final cleaned = _clean(raw);
+    return {
+      ...cleaned,                               // all Firestore fields (may contain nulls for optional fields)
+      'uid': cleaned['uid'] ?? '',              // required — never null
+      'displayName': cleaned['displayName'] ?? '',
+      'email': cleaned['email'] ?? '',
+      'createdAt': cleaned['createdAt'] ?? now,
+      'lastActiveAt': cleaned['lastActiveAt'] ?? now,
+    };
+  }
+
   // ---------------------------------------------------------------------------
   // Collection references
   // ---------------------------------------------------------------------------
@@ -89,17 +109,19 @@ class FirestoreService {
   Future<UserModel?> getUser(String uid) async {
     final snap = await _users.doc(uid).get();
     if (!snap.exists || snap.data() == null) return null;
-    return UserModel.fromJson(_clean(snap.data()!));
+    return UserModel.fromJson(_sanitizeUser(snap.data()!));
   }
 
   Future<void> updateUser(String uid, Map<String, dynamic> fields) async {
-    await _users.doc(uid).update(fields);
+    // Always persist uid so a partial merge never produces a uid-less document.
+    final data = {'uid': uid, ...fields};
+    await _users.doc(uid).set(data, SetOptions(merge: true));
   }
 
   Stream<UserModel?> userStream(String uid) {
     return _users.doc(uid).snapshots().map((snap) {
       if (!snap.exists || snap.data() == null) return null;
-      return UserModel.fromJson(_clean(snap.data()!));
+      return UserModel.fromJson(_sanitizeUser(snap.data()!));
     });
   }
 
@@ -251,7 +273,9 @@ class FirestoreService {
       String uid, String topicId) async {
     final snap = await _userProgress(uid).doc(topicId).get();
     if (!snap.exists || snap.data() == null) return null;
-    return ProgressModel.fromJson(_clean(snap.data()!));
+    final data = _clean(snap.data()!);
+    data['topicId'] ??= snap.id;
+    return ProgressModel.fromJson(data);
   }
 
   Future<void> saveTopicProgress(String uid, ProgressModel progress) async {
@@ -262,9 +286,11 @@ class FirestoreService {
 
   Future<List<ProgressModel>> getAllProgress(String uid) async {
     final snap = await _userProgress(uid).get();
-    return snap.docs
-        .map((d) => ProgressModel.fromJson(_clean(d.data())))
-        .toList();
+    return snap.docs.map((d) {
+      final data = _clean(d.data());
+      data['topicId'] ??= d.id;
+      return ProgressModel.fromJson(data);
+    }).toList();
   }
 
   Future<List<ProgressModel>> getWeakTopics(String uid,
@@ -274,9 +300,11 @@ class FirestoreService {
         .orderBy('accuracy')
         .limit(limit)
         .get();
-    return snap.docs
-        .map((d) => ProgressModel.fromJson(_clean(d.data())))
-        .toList();
+    return snap.docs.map((d) {
+      final data = _clean(d.data());
+      data['topicId'] ??= d.id;
+      return ProgressModel.fromJson(data);
+    }).toList();
   }
 
   // ---------------------------------------------------------------------------
@@ -307,6 +335,53 @@ class FirestoreService {
     final snap = await _chapters(domainId, subjectId, bookId).doc(chapterId).get();
     if (!snap.exists || snap.data() == null) return null;
     return ChapterModel.fromJson(_clean(snap.data()!));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Search — client-side filtering via collectionGroup
+  // ---------------------------------------------------------------------------
+
+  /// Searches all books across every domain/subject.
+  /// No composite index required — filtering is done in memory.
+  Future<List<BookModel>> searchBooks(String query) async {
+    final lower = query.trim().toLowerCase();
+    if (lower.isEmpty) return [];
+    final snap = await _db.collectionGroup('books').get();
+    return snap.docs.map((d) {
+      final data = _clean(d.data());
+      data['id'] ??= d.id;
+      return BookModel.fromJson(data);
+    }).where((b) {
+      return b.title.toLowerCase().contains(lower) ||
+          b.authors.any((a) => a.toLowerCase().contains(lower)) ||
+          b.description.toLowerCase().contains(lower) ||
+          b.examTags.any((t) => t.toLowerCase().contains(lower));
+    }).toList();
+  }
+
+  /// Searches all chapters across every book.
+  /// Falls back gracefully when createdAt is missing from a doc.
+  Future<List<ChapterModel>> searchChapters(String query) async {
+    final lower = query.trim().toLowerCase();
+    if (lower.isEmpty) return [];
+    final snap = await _db.collectionGroup('chapters').get();
+    final now = DateTime.now().toIso8601String();
+    final results = <ChapterModel>[];
+    for (final d in snap.docs) {
+      try {
+        final data = _clean(d.data());
+        data['id'] ??= d.id;
+        data['createdAt'] ??= now; // guard against missing timestamp
+        final chapter = ChapterModel.fromJson(data);
+        final hit = chapter.name.toLowerCase().contains(lower) ||
+            chapter.description.toLowerCase().contains(lower) ||
+            chapter.tags.any((t) => t.toLowerCase().contains(lower));
+        if (hit) results.add(chapter);
+      } catch (_) {
+        // Skip malformed documents rather than crashing the whole search
+      }
+    }
+    return results;
   }
 
   // ---------------------------------------------------------------------------
@@ -357,25 +432,40 @@ class FirestoreService {
   Future<PdfUploadModel?> getUpload(String uploadId) async {
     final snap = await _db.collection('uploads').doc(uploadId).get();
     if (!snap.exists || snap.data() == null) return null;
-    return PdfUploadModel.fromJson(_clean(snap.data()!));
+    final data = _clean(snap.data()!);
+    data['id'] ??= snap.id;
+    return PdfUploadModel.fromJson(data);
   }
 
   Stream<PdfUploadModel?> uploadStream(String uploadId) {
     return _db.collection('uploads').doc(uploadId).snapshots().map((snap) {
       if (!snap.exists || snap.data() == null) return null;
-      return PdfUploadModel.fromJson(_clean(snap.data()!));
+      final data = _clean(snap.data()!);
+      data['id'] ??= snap.id;
+      return PdfUploadModel.fromJson(data);
     });
   }
 
   Future<List<PdfUploadModel>> getUserUploads(String userId) async {
+    // Avoid a composite index requirement by not using orderBy in the query.
+    // We sort the results in memory instead.
     final snap = await _db
         .collection('uploads')
         .where('userId', isEqualTo: userId)
-        .orderBy('uploadedAt', descending: true)
         .get();
-    return snap.docs
-        .map((d) => PdfUploadModel.fromJson(_clean(d.data())))
-        .toList();
+    final models = snap.docs.map((d) {
+      // Merge the document ID so PdfUploadModel.id is never null even when
+      // the 'id' field was not written inside the document body.
+      final data = _clean(d.data());
+      if (!data.containsKey('id') || data['id'] == null) {
+        data['id'] = d.id;
+      }
+      return PdfUploadModel.fromJson(data);
+    }).toList();
+
+    // Sort newest-first in memory — equivalent to orderBy('uploadedAt', descending: true)
+    models.sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
+    return models;
   }
 
   // ---------------------------------------------------------------------------
