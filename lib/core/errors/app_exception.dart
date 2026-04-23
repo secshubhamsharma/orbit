@@ -24,3 +24,7 @@ class ServerException extends AppException {
   final int? statusCode;
   const ServerException(super.message, {super.code, this.statusCode});
 }
+
+class ApiException extends AppException {
+  const ApiException(super.message, {super.code});
+}
