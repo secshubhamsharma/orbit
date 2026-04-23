@@ -28,18 +28,26 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   File? _pickedImage;
   bool _isSaving = false;
   String? _error;
+  bool _initialized = false;
 
   @override
   void initState() {
     super.initState();
-    final user = ref.read(userProvider).valueOrNull;
-    _nameController = TextEditingController(text: user?.displayName ?? '');
+    _nameController = TextEditingController();
   }
 
   @override
   void dispose() {
     _nameController.dispose();
     super.dispose();
+  }
+
+  // Populate fields once the provider data arrives
+  void _init(String name) {
+    if (!_initialized) {
+      _initialized = true;
+      _nameController.text = name;
+    }
   }
 
   Future<void> _pickImage() async {
@@ -63,22 +71,33 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     });
 
     try {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
+      // Get UID from Firebase Auth — always available even if Firestore is slow
+      final firebaseUser = FirebaseAuth.instance.currentUser;
+      final uid = firebaseUser?.uid;
       if (uid == null) throw Exception('Not signed in');
 
       String? newPhotoUrl;
 
+      // Upload photo to Storage if user picked one
       if (_pickedImage != null) {
         final storageRef =
             FirebaseStorage.instance.ref().child('users/$uid/avatar.jpg');
         await storageRef.putFile(_pickedImage!);
         newPhotoUrl = await storageRef.getDownloadURL();
-        await FirebaseAuth.instance.currentUser?.updatePhotoURL(newPhotoUrl);
+        // Update Firebase Auth profile — wrapped so SSL issues don't block save
+        try {
+          await firebaseUser?.updatePhotoURL(newPhotoUrl);
+        } catch (_) {}
       }
 
       final newName = _nameController.text.trim();
-      await FirebaseAuth.instance.currentUser?.updateDisplayName(newName);
 
+      // Update Firebase Auth display name — wrapped so SSL issues don't block save
+      try {
+        await firebaseUser?.updateDisplayName(newName);
+      } catch (_) {}
+
+      // Firestore is the source of truth for the app — always update this
       final fields = <String, dynamic>{'displayName': newName};
       if (newPhotoUrl != null) fields['photoUrl'] = newPhotoUrl;
       await FirestoreService.instance.updateUser(uid, fields);
@@ -97,7 +116,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         context.pop();
       }
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = 'Failed to save. Please check your connection.');
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -105,10 +124,23 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final user = ref.watch(userProvider).valueOrNull;
-    final photoUrl = user?.photoUrl;
-    final name = user?.displayName ?? '';
-    final email = user?.email ?? '';
+    final userAsync = ref.watch(userProvider);
+
+    // Resolve name + email from Firestore first, fall back to Firebase Auth
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+    final firestoreUser = userAsync.valueOrNull;
+
+    final fsName = firestoreUser?.displayName ?? '';
+    final name = fsName.isNotEmpty ? fsName : (firebaseUser?.displayName ?? '');
+
+    final fsEmail = firestoreUser?.email ?? '';
+    final email = fsEmail.isNotEmpty ? fsEmail : (firebaseUser?.email ?? '');
+
+    final photoUrl = firestoreUser?.photoUrl?.isNotEmpty == true
+        ? firestoreUser!.photoUrl
+        : firebaseUser?.photoURL;
+
+    _init(name);
 
     return Scaffold(
       backgroundColor: AppColors.kBackground,
@@ -148,7 +180,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Photo picker ──────────────────────────────────────────
+              // ── Avatar picker ─────────────────────────────────────────
               Center(
                 child: GestureDetector(
                   onTap: _pickImage,
@@ -171,9 +203,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                   ),
                 ),
               ),
-
               const SizedBox(height: AppSpacing.xs),
-
               Center(
                 child: Text('Change photo',
                     style: AppTextStyles.caption
@@ -182,7 +212,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
 
               const SizedBox(height: AppSpacing.xl),
 
-              // ── Name field ────────────────────────────────────────────
+              // ── Name ──────────────────────────────────────────────────
               _FieldLabel('Display Name'),
               const SizedBox(height: AppSpacing.sm),
               TextFormField(
@@ -190,9 +220,12 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 style: AppTextStyles.bodyMedium,
                 textCapitalization: TextCapitalization.words,
                 decoration: _fieldDecor(
-                    hint: 'Your name', icon: Icons.person_outline_rounded),
+                    hint: 'Your name',
+                    icon: Icons.person_outline_rounded),
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Name cannot be empty';
+                  if (v == null || v.trim().isEmpty) {
+                    return 'Name cannot be empty';
+                  }
                   if (v.trim().length < 2) return 'At least 2 characters';
                   return null;
                 },
@@ -200,16 +233,16 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
 
               const SizedBox(height: AppSpacing.lg),
 
-              // ── Email (locked) ────────────────────────────────────────
+              // ── Email (read-only) ─────────────────────────────────────
               _FieldLabel('Email address'),
               const SizedBox(height: AppSpacing.sm),
               TextFormField(
                 initialValue: email,
                 readOnly: true,
                 style: AppTextStyles.bodyMedium
-                    .copyWith(color: AppColors.kTextDisabled),
+                    .copyWith(color: AppColors.kTextSecondary),
                 decoration: _fieldDecor(
-                  hint: '',
+                  hint: 'Email',
                   icon: Icons.email_outlined,
                 ).copyWith(
                   suffixIcon: const Icon(Icons.lock_outline_rounded,
@@ -225,21 +258,20 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                   padding: const EdgeInsets.all(AppSpacing.md),
                   decoration: BoxDecoration(
                     color: AppColors.kErrorContainer,
-                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                    borderRadius:
+                        BorderRadius.circular(AppSpacing.radiusMd),
                     border: Border.all(
                         color: AppColors.kError.withValues(alpha: 0.3)),
                   ),
-                  child: Text(
-                    _error!,
-                    style:
-                        AppTextStyles.bodySmall.copyWith(color: AppColors.kError),
-                  ),
+                  child: Text(_error!,
+                      style: AppTextStyles.bodySmall
+                          .copyWith(color: AppColors.kError)),
                 ),
               ],
 
               const SizedBox(height: AppSpacing.xxl),
 
-              // ── Save button ───────────────────────────────────────────
+              // ── Save ──────────────────────────────────────────────────
               SizedBox(
                 width: double.infinity,
                 height: 50,
@@ -250,13 +282,15 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                       begin: Alignment.centerLeft,
                       end: Alignment.centerRight,
                     ),
-                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                    borderRadius:
+                        BorderRadius.circular(AppSpacing.radiusMd),
                   ),
                   child: Material(
                     color: Colors.transparent,
                     child: InkWell(
                       onTap: _isSaving ? null : _save,
-                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                      borderRadius:
+                          BorderRadius.circular(AppSpacing.radiusMd),
                       child: Center(
                         child: _isSaving
                             ? const SizedBox(
@@ -281,36 +315,38 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   }
 
   Widget _buildAvatar(String? url, String name) {
-    const radius = 52.0;
+    const r = 52.0;
     if (_pickedImage != null) {
-      return CircleAvatar(
-          radius: radius, backgroundImage: FileImage(_pickedImage!));
+      return CircleAvatar(radius: r, backgroundImage: FileImage(_pickedImage!));
     }
     if (url != null && url.isNotEmpty) {
       return CircleAvatar(
-        radius: radius,
+        radius: r,
         backgroundImage: CachedNetworkImageProvider(url),
         backgroundColor: AppColors.kSurfaceVariant,
       );
     }
     final parts = name.trim().split(' ');
-    final initials = parts.length == 1
-        ? (parts.first.isNotEmpty ? parts.first[0].toUpperCase() : '?')
-        : (parts.first[0] + parts.last[0]).toUpperCase();
+    final initials = parts.isEmpty || parts.first.isEmpty
+        ? '?'
+        : parts.length == 1
+            ? parts.first[0].toUpperCase()
+            : (parts.first[0] + parts.last[0]).toUpperCase();
     return CircleAvatar(
-      radius: radius,
+      radius: r,
       backgroundColor: AppColors.kPrimaryContainer,
       child: Text(initials,
-          style: AppTextStyles.displayMedium
-              .copyWith(color: AppColors.kPrimary)),
+          style:
+              AppTextStyles.displayMedium.copyWith(color: AppColors.kPrimary)),
     );
   }
 
-  InputDecoration _fieldDecor({required String hint, required IconData icon}) {
+  InputDecoration _fieldDecor(
+      {required String hint, required IconData icon}) {
     return InputDecoration(
       hintText: hint,
-      hintStyle:
-          AppTextStyles.bodyMedium.copyWith(color: AppColors.kTextDisabled),
+      hintStyle: AppTextStyles.bodyMedium
+          .copyWith(color: AppColors.kTextDisabled),
       prefixIcon: Icon(icon, size: 20, color: AppColors.kTextSecondary),
       filled: true,
       fillColor: AppColors.kSurface,
@@ -347,11 +383,9 @@ class _FieldLabel extends StatelessWidget {
   const _FieldLabel(this.text);
 
   @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: AppTextStyles.labelMedium
-          .copyWith(color: AppColors.kTextSecondary),
-    );
-  }
+  Widget build(BuildContext context) => Text(
+        text,
+        style: AppTextStyles.labelMedium
+            .copyWith(color: AppColors.kTextSecondary),
+      );
 }
