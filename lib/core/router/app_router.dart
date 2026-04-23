@@ -11,7 +11,6 @@ import '../../features/home/screens/home_screen.dart';
 import '../../features/library/screens/library_screen.dart';
 import '../../features/library/screens/domain_screen.dart';
 import '../../features/library/screens/subject_screen.dart';
-import '../../features/library/screens/topic_screen.dart';
 import '../../features/library/screens/book_screen.dart';
 import '../../features/library/screens/chapter_screen.dart';
 import '../../features/search/screens/search_screen.dart';
@@ -23,6 +22,7 @@ import '../../features/profile/screens/my_uploads_screen.dart';
 import '../../features/flashcards/screens/review_session_screen.dart';
 import '../../features/flashcards/screens/card_result_screen.dart';
 import '../../features/flashcards/screens/flashcard_set_screen.dart';
+import '../../providers/session_provider.dart';
 import '../../features/pdf_upload/screens/pdf_upload_screen.dart';
 import '../../features/pdf_upload/screens/pdf_preview_screen.dart';
 import '../../features/pdf_upload/screens/pdf_result_screen.dart';
@@ -180,17 +180,17 @@ final appRouter = GoRouter(
 
     // full-screen routes (no bottom nav)
     GoRoute(
-      path: '/review/:topicId',
+      path: '/review/:chapterId',
       name: RouteNames.review,
       builder: (context, state) => ReviewSessionScreen(
-        topicId: state.pathParameters['topicId']!,
+        args: state.extra as SessionArgs,
       ),
       routes: [
         GoRoute(
           path: 'result',
           name: RouteNames.cardResult,
           builder: (context, state) => CardResultScreen(
-            topicId: state.pathParameters['topicId']!,
+            args: state.extra as SessionArgs,
           ),
         ),
       ],
