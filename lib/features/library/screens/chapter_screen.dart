@@ -8,6 +8,7 @@ import 'package:orbitapp/core/constants/app_text_styles.dart';
 import 'package:orbitapp/models/book_model.dart';
 import 'package:orbitapp/models/chapter_model.dart';
 import 'package:orbitapp/providers/library_provider.dart';
+import 'package:orbitapp/providers/session_provider.dart';
 import 'package:orbitapp/services/api_service.dart';
 import 'package:orbitapp/services/firestore_service.dart';
 import 'package:orbitapp/shared/widgets/orbit_button.dart';
@@ -157,7 +158,17 @@ class _ChapterScreenState extends ConsumerState<ChapterScreen> {
               onGenerate: () {
                 if (book != null) _generateCards(chapter, book);
               },
-              onStudy: () => context.push('/review/${chapter.id}'),
+              onStudy: () => context.push(
+                '/review/${chapter.id}',
+                extra: SessionArgs(
+                  domainId: widget.domainId,
+                  subjectId: widget.subjectId,
+                  bookId: widget.bookId,
+                  chapterId: chapter.id,
+                  chapterName: chapter.name,
+                  bookTitle: book?.title ?? '',
+                ),
+              ),
               onRegenerate: () {
                 if (book != null) _generateCards(chapter, book);
               },
