@@ -14,7 +14,8 @@ class RouteNames {
   static const library = 'library';
   static const domain = 'domain';
   static const subject = 'subject';
-  static const topic = 'topic';
+  static const book = 'book';
+  static const chapter = 'chapter';
   static const search = 'search';
   static const progress = 'progress';
   static const topicDetail = 'topic-detail';

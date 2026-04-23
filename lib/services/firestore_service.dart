@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:orbitapp/models/app_config_model.dart';
+import 'package:orbitapp/models/book_model.dart';
+import 'package:orbitapp/models/chapter_model.dart';
 import 'package:orbitapp/models/card_schedule_model.dart';
 import 'package:orbitapp/models/domain_model.dart';
 import 'package:orbitapp/models/flashcard_model.dart';
@@ -56,6 +58,16 @@ class FirestoreService {
   CollectionReference<Map<String, dynamic>> _flashcards(
           String domainId, String subjectId, String topicId) =>
       _topics(domainId, subjectId).doc(topicId).collection('flashcards');
+
+  CollectionReference<Map<String, dynamic>> _books(String domainId, String subjectId) =>
+      _subjects(domainId).doc(subjectId).collection('books');
+
+  CollectionReference<Map<String, dynamic>> _chapters(String domainId, String subjectId, String bookId) =>
+      _books(domainId, subjectId).doc(bookId).collection('chapters');
+
+  CollectionReference<Map<String, dynamic>> _chapterFlashcards(
+          String domainId, String subjectId, String bookId, String chapterId) =>
+      _chapters(domainId, subjectId, bookId).doc(chapterId).collection('flashcards');
 
   CollectionReference<Map<String, dynamic>> _schedules(String uid) =>
       _users.doc(uid).collection('schedules');
@@ -265,6 +277,59 @@ class FirestoreService {
     return snap.docs
         .map((d) => ProgressModel.fromJson(_clean(d.data())))
         .toList();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Books
+  // ---------------------------------------------------------------------------
+
+  Future<List<BookModel>> getBooks(String domainId, String subjectId) async {
+    final snap = await _books(domainId, subjectId).orderBy('order').get();
+    return snap.docs.map((d) => BookModel.fromJson(_clean(d.data()))).toList();
+  }
+
+  Future<BookModel?> getBook(String domainId, String subjectId, String bookId) async {
+    final snap = await _books(domainId, subjectId).doc(bookId).get();
+    if (!snap.exists || snap.data() == null) return null;
+    return BookModel.fromJson(_clean(snap.data()!));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Chapters
+  // ---------------------------------------------------------------------------
+
+  Future<List<ChapterModel>> getChapters(String domainId, String subjectId, String bookId) async {
+    final snap = await _chapters(domainId, subjectId, bookId).orderBy('chapterNumber').get();
+    return snap.docs.map((d) => ChapterModel.fromJson(_clean(d.data()))).toList();
+  }
+
+  Future<ChapterModel?> getChapter(String domainId, String subjectId, String bookId, String chapterId) async {
+    final snap = await _chapters(domainId, subjectId, bookId).doc(chapterId).get();
+    if (!snap.exists || snap.data() == null) return null;
+    return ChapterModel.fromJson(_clean(snap.data()!));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Chapter flashcards
+  // ---------------------------------------------------------------------------
+
+  Future<List<FlashcardModel>> getChapterFlashcards(
+      String domainId, String subjectId, String bookId, String chapterId) async {
+    final snap = await _chapterFlashcards(domainId, subjectId, bookId, chapterId)
+        .orderBy('order')
+        .get();
+    return snap.docs.map((d) => FlashcardModel.fromJson(_clean(d.data()))).toList();
+  }
+
+  Future<int> getChapterFlashcardCount(
+      String domainId, String subjectId, String bookId, String chapterId) async {
+    final snap = await _chapterFlashcards(domainId, subjectId, bookId, chapterId).count().get();
+    return snap.count ?? 0;
+  }
+
+  Future<void> updateChapterCardCount(
+      String domainId, String subjectId, String bookId, String chapterId, int count) async {
+    await _chapters(domainId, subjectId, bookId).doc(chapterId).update({'totalCards': count});
   }
 
   // ---------------------------------------------------------------------------
