@@ -213,13 +213,13 @@ class _GreetingHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${_greeting()} 👋',
+                  _greeting(),
                   style: AppTextStyles.bodyMedium
                       .copyWith(color: AppColors.kTextSecondary),
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  name.isEmpty ? 'Welcome back' : name,
+                  name.isEmpty ? 'Welcome back 👋' : '$name 👋',
                   style: AppTextStyles.headingLarge,
                 ),
               ],
