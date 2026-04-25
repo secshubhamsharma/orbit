@@ -37,6 +37,7 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen>
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
   String _selectedDomain = _domains.first.$1;
+  bool _isSubmitting = false;
 
   late final AnimationController _entranceCtrl;
 
@@ -109,9 +110,10 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen>
 
   // ── Upload ────────────────────────────────────────────────────────────────
 
-  Future<void> _startUpload(UploadState state) async {
+  Future<void> _startUpload(UploadState uploadState) async {
+    if (_isSubmitting) return;
     if (!_formKey.currentState!.validate()) return;
-    if (!state.hasFile) {
+    if (!uploadState.hasFile) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Please select a PDF file first.',
@@ -122,15 +124,22 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen>
       return;
     }
 
-    await ref.read(uploadNotifierProvider.notifier).startUpload(
+    setState(() => _isSubmitting = true);
+
+    // startUpload returns the uploadId as soon as the Firestore doc is created.
+    // The server call runs in the background — we navigate immediately.
+    // The preview screen watches Firestore in real-time and updates automatically.
+    final uploadId = await ref.read(uploadNotifierProvider.notifier).startUpload(
           topicName: _nameCtrl.text.trim(),
           domainId: _selectedDomain,
         );
 
-    final newState = ref.read(uploadNotifierProvider);
-    if (newState.step == UploadStep.done && mounted) {
-      context.push('/upload/preview/${newState.uploadId}');
+    if (!mounted) return;
+    setState(() => _isSubmitting = false);
+
+    if (uploadId != null) {
       ref.read(uploadNotifierProvider.notifier).reset();
+      context.push('/upload/preview/$uploadId');
     }
   }
 
@@ -166,9 +175,7 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen>
           children: [
             _buildAppBar(),
             Expanded(
-              child: uploadState.isBusy
-                  ? _buildProcessingView(uploadState)
-                  : _buildForm(uploadState),
+              child: _buildForm(uploadState),
             ),
           ],
         ),
@@ -402,7 +409,7 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen>
               child: SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: uploadState.isBusy
+                  onPressed: _isSubmitting
                       ? null
                       : () => _startUpload(uploadState),
                   style: FilledButton.styleFrom(
@@ -416,17 +423,24 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen>
                           BorderRadius.circular(AppSpacing.radiusMd),
                     ),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.auto_awesome_rounded,
-                          size: 18, color: Colors.white),
-                      const SizedBox(width: AppSpacing.sm),
-                      Text('Generate Flashcards',
-                          style: AppTextStyles.labelLarge
-                              .copyWith(color: Colors.white)),
-                    ],
-                  ),
+                  child: _isSubmitting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.auto_awesome_rounded,
+                                size: 18, color: Colors.white),
+                            const SizedBox(width: AppSpacing.sm),
+                            Text('Generate Flashcards',
+                                style: AppTextStyles.labelLarge
+                                    .copyWith(color: Colors.white)),
+                          ],
+                        ),
                 ),
               ),
             ),

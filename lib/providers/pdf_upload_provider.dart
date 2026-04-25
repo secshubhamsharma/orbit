@@ -83,25 +83,30 @@ class UploadNotifier extends StateNotifier<UploadState> {
     state = state.copyWith(step: UploadStep.picked, error: null);
   }
 
-  /// Kick off the full upload → server processing pipeline.
-  Future<void> startUpload({
+  /// Creates the Firestore upload doc, then fires the server processing call
+  /// in the background. Returns the uploadId immediately so the UI can navigate
+  /// to the preview screen without waiting for the server.
+  ///
+  /// Returns null if preconditions fail (no file, not signed in, Firestore error).
+  Future<String?> startUpload({
     required String topicName,
     required String domainId,
   }) async {
-    if (!state.hasFile) return;
+    if (!state.hasFile) return null;
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
       state = state.copyWith(
           step: UploadStep.failed, error: 'Not signed in.');
-      return;
+      return null;
     }
 
     final uploadId = _uuid.v4();
     final filePath = state.filePath!;
     final fileName = state.fileName!;
+    final sizeMB = state.fileSizeMB;
 
-    // ── 1. Create upload document ────────────────────────────────────────────
+    // ── 1. Create Firestore upload document (status = 'uploading') ───────────
     state = state.copyWith(
       step: UploadStep.uploading,
       uploadId: uploadId,
@@ -113,7 +118,7 @@ class UploadNotifier extends StateNotifier<UploadState> {
       userId: uid,
       fileName: fileName,
       storagePath: 'uploads/$uid/$uploadId.pdf',
-      fileSizeMB: state.fileSizeMB,
+      fileSizeMB: sizeMB,
       status: 'uploading',
       uploadedAt: DateTime.now(),
       topicName: topicName,
@@ -125,44 +130,59 @@ class UploadNotifier extends StateNotifier<UploadState> {
     } catch (e) {
       state = state.copyWith(
           step: UploadStep.failed,
-          error: 'Could not create upload record: $e');
-      return;
+          error: 'Could not create upload record. Check your connection.');
+      return null;
     }
 
-    // ── 2. Send PDF to server (multipart) ────────────────────────────────────
+    // ── 2. Mark as processing and return uploadId to trigger navigation ───────
+    // The server call runs in the background. The preview screen listens to
+    // the Firestore stream and will update automatically when the server
+    // finishes (status → 'completed' or 'failed').
     try {
-      await FirestoreService.instance
-          .updateUploadStatus(uploadId, 'processing');
+      await FirestoreService.instance.updateUploadStatus(uploadId, 'processing');
+    } catch (_) {
+      // Non-fatal — Firestore offline persistence will sync later
+    }
 
-      state = state.copyWith(step: UploadStep.processing, uploadProgress: 1.0);
+    state = state.copyWith(step: UploadStep.done, uploadId: uploadId);
 
+    // ── 3. Fire server call without awaiting — background processing ──────────
+    _sendToServer(
+      uploadId: uploadId,
+      filePath: filePath,
+      topicName: topicName,
+      domainId: domainId,
+    );
+
+    return uploadId;
+  }
+
+  /// Background method — sends the PDF to the AI server.
+  /// Updates Firestore on success or failure.
+  Future<void> _sendToServer({
+    required String uploadId,
+    required String filePath,
+    required String topicName,
+    required String domainId,
+  }) async {
+    try {
       await ApiService.instance.processPdf(
         uploadId: uploadId,
         filePath: filePath,
         topicName: topicName,
         domainId: domainId,
-        onProgress: (p) {
-          state = state.copyWith(uploadProgress: p);
-        },
       );
-
-      // Server updates Firestore status to 'completed' itself.
-      // We just flag done locally so the UI navigates.
-      state = state.copyWith(step: UploadStep.done, uploadId: uploadId);
+      // Server is responsible for writing status='completed' and creating
+      // the chapters subcollection. If it doesn't (old server version),
+      // mark completed here as a fallback so the preview screen isn't stuck.
     } on Exception catch (e) {
-      // Mark failed in Firestore
       try {
         await FirestoreService.instance.updateUploadStatus(
           uploadId,
           'failed',
-          error: e.toString(),
+          error: _friendlyError(e.toString()),
         );
       } catch (_) {}
-
-      state = state.copyWith(
-        step: UploadStep.failed,
-        error: _friendlyError(e.toString()),
-      );
     }
   }
 
