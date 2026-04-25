@@ -221,6 +221,8 @@ class _GreetingHeader extends StatelessWidget {
                 Text(
                   name.isEmpty ? 'Welcome back 👋' : '$name 👋',
                   style: AppTextStyles.headingLarge,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
