@@ -9,11 +9,15 @@ const { getFirestore } = require('../utils/firebase');
 const router = express.Router();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Store uploads in /tmp — cleaned up after processing
+// ─── Temp upload directory ─────────────────────────────────────────────────────
+const UPLOAD_DIR = '/tmp/orbit-uploads';
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// ─── Multer config ─────────────────────────────────────────────────────────────
 const upload = multer({
-  dest: '/tmp/orbit-uploads/',
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
-  fileFilter: (req, file, cb) => {
+  dest: UPLOAD_DIR,
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
+  fileFilter: (_req, file, cb) => {
     if (file.mimetype === 'application/pdf') {
       cb(null, true);
     } else {
@@ -22,134 +26,282 @@ const upload = multer({
   },
 });
 
+// ─── Constants ─────────────────────────────────────────────────────────────────
+const MAX_TEXT_CHARS = 40000;   // ~10,000 tokens — safe for Gemini 1.5 Flash
+const MAX_CHAPTERS   = 8;
+const MIN_CHAPTERS   = 2;
+const CARDS_PER_CHAPTER_MIN = 5;
+const CARDS_PER_CHAPTER_MAX = 12;
+
 // ─── POST /api/pdf/process ────────────────────────────────────────────────────
 router.post('/process', upload.single('pdf'), async (req, res) => {
   const { uploadId, topicName, domainId } = req.body;
-  const userId = req.user.uid;
+  const filePath = req.file?.path;
 
+  // ── Validation ────────────────────────────────────────────────────────────
   if (!uploadId || !topicName || !domainId) {
+    cleanupFile(filePath);
     return res.status(400).json({
       success: false,
       message: 'uploadId, topicName and domainId are required.',
     });
   }
-
   if (!req.file) {
     return res.status(400).json({ success: false, message: 'PDF file is required.' });
   }
 
   const db = getFirestore();
   const uploadRef = db.collection('uploads').doc(uploadId);
-  const filePath = req.file.path;
 
   try {
-    // ── Update status: processing ─────────────────────────────────────────
+    // ── 1. Mark as processing ─────────────────────────────────────────────
     await uploadRef.update({ status: 'processing' });
 
-    // ── Extract text from PDF ─────────────────────────────────────────────
+    // ── 2. Extract text from PDF ──────────────────────────────────────────
     const buffer = fs.readFileSync(filePath);
     const parsed = await pdfParse(buffer);
     const pageCount = parsed.numpages;
-    const rawText = parsed.text.trim();
+    const rawText = parsed.text?.trim() || '';
 
-    if (!rawText || rawText.length < 100) {
-      await uploadRef.update({ status: 'failed', error: 'Could not extract text from this PDF.' });
+    if (rawText.length < 100) {
+      await markFailed(uploadRef, 'Could not extract readable text from this PDF. Make sure it is not a scanned image-only PDF.');
       return res.status(422).json({
         success: false,
         message: 'Could not extract readable text from the PDF.',
       });
     }
 
-    // Truncate to ~12,000 chars to stay within Gemini context
-    const text = rawText.slice(0, 12000);
+    // Truncate but keep as much text as possible
+    const text = rawText.slice(0, MAX_TEXT_CHARS);
 
-    // ── Build Gemini prompt ───────────────────────────────────────────────
-    const prompt = `
-You are an expert educator. A student uploaded a PDF about "${topicName}".
+    // ── 3. Generate chapter-wise flashcards with Gemini ───────────────────
+    let chapters;
+    try {
+      chapters = await generateChapters(topicName, text);
+    } catch (geminiErr) {
+      console.error('[PDF] Gemini failed:', geminiErr.message);
+      await markFailed(uploadRef, 'AI failed to process this PDF. Please try again.');
+      return res.status(500).json({ success: false, message: 'AI generation failed. Please try again.' });
+    }
 
-Based on the following text extracted from the PDF, generate 25 high-quality study flashcards.
+    if (!chapters || chapters.length === 0) {
+      await markFailed(uploadRef, 'AI could not identify any study content in this PDF.');
+      return res.status(422).json({ success: false, message: 'No study content found in PDF.' });
+    }
 
-Use a mix of types:
-- "flashcard": term/definition or question/answer (12 cards)
-- "mcq": multiple choice with 4 options (8 cards)
-- "fill_blank": sentence with a ___ blank (3 cards)
-- "true_false": true or false (2 cards)
+    // ── 4. Write chapters + cards to Firestore ────────────────────────────
+    const { totalCards } = await writeChaptersToFirestore(db, uploadRef, uploadId, chapters);
 
-Return ONLY a JSON array with no markdown or explanation. Each card:
+    // ── 5. Mark completed ─────────────────────────────────────────────────
+    await uploadRef.update({
+      status: 'completed',
+      pageCount,
+      generatedCardCount: totalCards,
+      completedAt: new Date().toISOString(),
+    });
+
+    console.log(`[PDF] ${uploadId}: ${chapters.length} chapters, ${totalCards} cards`);
+    res.json({ success: true, cardCount: totalCards, pageCount, chapterCount: chapters.length });
+
+  } catch (err) {
+    console.error('[PDF] Unexpected error:', err.message);
+    await markFailed(uploadRef, err.message || 'Processing failed').catch(() => {});
+    res.status(500).json({ success: false, message: 'PDF processing failed. Please try again.' });
+  } finally {
+    cleanupFile(filePath);
+  }
+});
+
+// ─── Gemini: detect chapters and generate flashcards ──────────────────────────
+async function generateChapters(topicName, text) {
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+  const prompt = `
+You are an expert educator. A student uploaded a PDF titled "${topicName}".
+
+Analyze the text below and:
+1. Identify ${MIN_CHAPTERS}–${MAX_CHAPTERS} logical chapters or sections based on the content structure.
+2. For each chapter generate ${CARDS_PER_CHAPTER_MIN}–${CARDS_PER_CHAPTER_MAX} high-quality flashcards.
+
+Return ONLY a valid JSON object — no markdown, no code fences, no explanation:
 {
-  "type": "flashcard" | "mcq" | "fill_blank" | "true_false",
-  "front": "question or term",
-  "back": "answer or definition",
-  "options": ["A","B","C","D"],  // mcq only
-  "correctOption": 0,            // 0-indexed, mcq only
-  "explanation": "optional",
-  "difficulty": "easy" | "medium" | "hard",
-  "tags": ["tag1"]
+  "chapters": [
+    {
+      "title": "Chapter or section title",
+      "order": 0,
+      "cards": [
+        {
+          "type": "flashcard",
+          "front": "Question or term",
+          "back": "Answer or definition",
+          "options": [],
+          "correctOption": null,
+          "explanation": "Optional explanation shown after answer",
+          "difficulty": "easy"
+        }
+      ]
+    }
+  ]
 }
+
+Card type rules:
+- "flashcard" — classic Q&A or term/definition (use for 50% of cards)
+- "mcq" — multiple choice; options = 4 strings, correctOption = 0-indexed int (30% of cards)
+- "fill_blank" — sentence with ___ to fill in (10% of cards)
+- "true_false" — back must be "True" or "False" (10% of cards)
+
+Difficulty rules:
+- easy: recall of basic facts
+- medium: application or comparison
+- hard: analysis or multi-step reasoning
+
+Quality rules:
+- Each question must be clear and standalone
+- MCQ distractors must be plausible but clearly wrong
+- No duplicate questions across chapters
+- Content must match the chapter title
 
 PDF TEXT:
 ${text}
 `.trim();
 
-    // ── Call Gemini ───────────────────────────────────────────────────────
-    let cards;
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  let responseText;
+  try {
     const result = await model.generateContent(prompt);
-    const responseText = result.response.text().trim();
-    const cleaned = responseText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-    cards = JSON.parse(cleaned);
-
-    if (!Array.isArray(cards)) throw new Error('Response is not an array');
-
-    // ── Write cards to Firestore ──────────────────────────────────────────
-    const cardsRef = uploadRef.collection('flashcards');
-    const batch = db.batch();
-    const now = new Date().toISOString();
-    let written = 0;
-
-    cards.forEach((card, index) => {
-      if (!card.front || !card.back) return;
-      const ref = cardsRef.doc();
-      batch.set(ref, {
-        id: ref.id,
-        topicId: uploadId,
-        type: card.type || 'flashcard',
-        front: String(card.front).trim(),
-        back: String(card.back).trim(),
-        options: card.type === 'mcq' && Array.isArray(card.options) ? card.options : [],
-        correctOption: card.type === 'mcq' ? (card.correctOption ?? 0) : null,
-        explanation: card.explanation || null,
-        difficulty: card.difficulty || 'medium',
-        tags: Array.isArray(card.tags) ? card.tags.slice(0, 3) : [],
-        createdAt: now,
-        generatedByAI: true,
-        order: index,
-      });
-      written++;
-    });
-
-    await batch.commit();
-
-    // ── Mark upload as completed ──────────────────────────────────────────
-    await uploadRef.update({
-      status: 'completed',
-      pageCount,
-      generatedCardCount: written,
-      completedAt: new Date().toISOString(),
-    });
-
-    res.json({ success: true, cardCount: written, pageCount });
+    responseText = result.response.text().trim();
   } catch (err) {
-    console.error('[PDF]', err.message);
-    await uploadRef.update({
-      status: 'failed',
-      error: err.message || 'Processing failed',
-    }).catch(() => {});
-    res.status(500).json({ success: false, message: 'PDF processing failed. Please try again.' });
-  } finally {
-    // Always clean up the temp file
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    throw new Error(`Gemini API error: ${err.message}`);
   }
-});
+
+  // Strip markdown fences if Gemini adds them despite instructions
+  const cleaned = responseText
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/, '')
+    .trim();
+
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (_) {
+    // Try to extract JSON object from the response (sometimes Gemini adds preamble)
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('Gemini returned non-JSON response');
+    parsed = JSON.parse(match[0]);
+  }
+
+  if (!parsed.chapters || !Array.isArray(parsed.chapters)) {
+    throw new Error('Gemini response missing chapters array');
+  }
+
+  // Sanitize and validate
+  return parsed.chapters
+    .filter(ch => ch.title && Array.isArray(ch.cards) && ch.cards.length > 0)
+    .slice(0, MAX_CHAPTERS)
+    .map((ch, i) => ({
+      title: String(ch.title).trim(),
+      order: i,
+      cards: sanitizeCards(ch.cards, `${i}`),
+    }));
+}
+
+// ─── Sanitize individual card objects ─────────────────────────────────────────
+function sanitizeCards(rawCards, chapterId) {
+  const validTypes = ['flashcard', 'mcq', 'fill_blank', 'true_false'];
+  const validDiffs  = ['easy', 'medium', 'hard'];
+
+  return rawCards
+    .filter(c => c.front && c.back)
+    .slice(0, CARDS_PER_CHAPTER_MAX)
+    .map((c, index) => ({
+      type: validTypes.includes(c.type) ? c.type : 'flashcard',
+      front: String(c.front).trim(),
+      back: String(c.back).trim(),
+      options: c.type === 'mcq' && Array.isArray(c.options)
+        ? c.options.map(String).slice(0, 4)
+        : [],
+      correctOption: c.type === 'mcq' && typeof c.correctOption === 'number'
+        ? c.correctOption
+        : null,
+      explanation: c.explanation ? String(c.explanation).trim() : null,
+      difficulty: validDiffs.includes(c.difficulty) ? c.difficulty : 'medium',
+      tags: [],
+      order: index,
+      generatedByAI: true,
+      topicId: chapterId,
+    }));
+}
+
+// ─── Write chapters + cards to Firestore ──────────────────────────────────────
+// Firestore batch limit = 500 ops. With max 8 chapters × 12 cards = 96 + 8 = 104 — safe.
+// But we split into batches of 200 for safety on very large sets.
+async function writeChaptersToFirestore(db, uploadRef, uploadId, chapters) {
+  const now = new Date().toISOString();
+  let totalCards = 0;
+
+  // Operations: 1 chapter doc + N card docs per chapter
+  // Keep a rolling batch, commit every 200 ops
+  let batch = db.batch();
+  let opsInBatch = 0;
+
+  const commitBatch = async () => {
+    if (opsInBatch > 0) {
+      await batch.commit();
+      batch = db.batch();
+      opsInBatch = 0;
+    }
+  };
+
+  const addToBatch = (ref, data) => {
+    batch.set(ref, data);
+    opsInBatch++;
+  };
+
+  for (const chapter of chapters) {
+    // Create chapter document
+    const chapterRef = uploadRef.collection('chapters').doc();
+    const chapterId = chapterRef.id;
+
+    addToBatch(chapterRef, {
+      id: chapterId,
+      uploadId,
+      title: chapter.title,
+      cardCount: chapter.cards.length,
+      order: chapter.order,
+    });
+
+    // Create card documents under this chapter
+    for (const card of chapter.cards) {
+      const cardRef = chapterRef.collection('cards').doc();
+      addToBatch(cardRef, {
+        ...card,
+        id: cardRef.id,
+        topicId: chapterId,
+        createdAt: now,
+      });
+      totalCards++;
+    }
+
+    // Commit if approaching batch limit
+    if (opsInBatch >= 200) {
+      await commitBatch();
+    }
+  }
+
+  // Commit remaining ops
+  await commitBatch();
+
+  return { totalCards };
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+async function markFailed(uploadRef, error) {
+  return uploadRef.update({ status: 'failed', error }).catch(() => {});
+}
+
+function cleanupFile(filePath) {
+  if (filePath && fs.existsSync(filePath)) {
+    try { fs.unlinkSync(filePath); } catch (_) {}
+  }
+}
 
 module.exports = router;

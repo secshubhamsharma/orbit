@@ -27,11 +27,14 @@ router.post('/generate', async (req, res) => {
     .collection('flashcards');
 
   // ── Check if cards already exist ───────────────────────────────────────────
-  const existing = await cardsRef.count().get();
-  if (existing.data().count > 0) {
+  // Use limit(1) instead of count() for broader Firebase Admin SDK compatibility
+  const existing = await cardsRef.limit(1).get();
+  if (!existing.empty) {
+    // Fetch actual count for the response
+    const allExisting = await cardsRef.select().get();
     return res.json({
       success: true,
-      cardCount: existing.data().count,
+      cardCount: allExisting.size,
       generated: false,
       message: 'Cards already exist for this topic.',
     });
