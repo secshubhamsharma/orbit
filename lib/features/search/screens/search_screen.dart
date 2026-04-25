@@ -17,38 +17,19 @@ class SearchScreen extends ConsumerStatefulWidget {
   ConsumerState<SearchScreen> createState() => _SearchScreenState();
 }
 
-class _SearchScreenState extends ConsumerState<SearchScreen>
-    with TickerProviderStateMixin {
+class _SearchScreenState extends ConsumerState<SearchScreen> {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
-
-  late final AnimationController _barAnim;
-  late final Animation<double> _barBorder;
 
   @override
   void initState() {
     super.initState();
-    _barAnim = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 200),
-    );
-    _barBorder = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _barAnim, curve: Curves.easeOut),
-    );
-    _focusNode.addListener(() {
-      if (_focusNode.hasFocus) {
-        _barAnim.forward();
-      } else {
-        _barAnim.reverse();
-      }
-    });
   }
 
   @override
   void dispose() {
     _controller.dispose();
     _focusNode.dispose();
-    _barAnim.dispose();
     super.dispose();
   }
 
@@ -103,7 +84,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
                 child: _SearchBar(
                   controller: _controller,
                   focusNode: _focusNode,
-                  borderAnim: _barBorder,
                   hasText: state.query.isNotEmpty,
                   onChanged: _onChanged,
                   onSubmitted: _onSubmitted,
@@ -201,7 +181,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
 class _SearchBar extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
-  final Animation<double> borderAnim;
   final bool hasText;
   final ValueChanged<String> onChanged;
   final ValueChanged<String> onSubmitted;
@@ -210,7 +189,6 @@ class _SearchBar extends StatelessWidget {
   const _SearchBar({
     required this.controller,
     required this.focusNode,
-    required this.borderAnim,
     required this.hasText,
     required this.onChanged,
     required this.onSubmitted,
@@ -219,24 +197,13 @@ class _SearchBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: borderAnim,
-      builder: (_, child) {
-        final borderColor = Color.lerp(
-          AppColors.kBorder,
-          AppColors.kPrimary,
-          borderAnim.value,
-        )!;
-        return Container(
-          height: 50,
-          decoration: BoxDecoration(
-            color: AppColors.kSurface,
-            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            border: Border.all(color: borderColor, width: 1.5),
-          ),
-          child: child,
-        );
-      },
+    return Container(
+      height: 50,
+      decoration: BoxDecoration(
+        color: AppColors.kSurface,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.kBorder),
+      ),
       child: Row(
         children: [
           const SizedBox(width: AppSpacing.md),
@@ -256,6 +223,8 @@ class _SearchBar extends StatelessWidget {
                 hintStyle: AppTextStyles.bodyMedium
                     .copyWith(color: AppColors.kTextDisabled),
                 border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
                 isDense: true,
               ),
             ),
