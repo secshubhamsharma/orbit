@@ -59,11 +59,27 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen>
   // ── File picking ─────────────────────────────────────────────────────────
 
   Future<void> _pickFile() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf'],
-      allowMultiple: false,
-    );
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+        allowMultiple: false,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not open file picker. Please restart the app and try again.',
+              style: AppTextStyles.bodyMedium,
+            ),
+            backgroundColor: AppColors.kError,
+          ),
+        );
+      }
+      return;
+    }
 
     if (result == null || result.files.isEmpty) return;
 
@@ -169,7 +185,13 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen>
       child: Row(
         children: [
           GestureDetector(
-            onTap: () => context.pop(),
+            onTap: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/home');
+              }
+            },
             child: Container(
               width: 38,
               height: 38,
