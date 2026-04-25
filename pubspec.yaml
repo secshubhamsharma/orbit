@@ -49,6 +49,8 @@ dependencies:
   permission_handler: ^11.3.1
   image_picker: ^1.0.7
   flutter_local_notifications: ^17.1.2
+  file_picker: ^8.0.0
+  uuid: ^4.4.0
 
   # ocr & pdf
   google_mlkit_document_scanner: ^0.1.0
