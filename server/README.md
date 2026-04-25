@@ -67,11 +67,53 @@ server {
 |--------|-------|-------------|
 | GET | /health | Health check (no auth) |
 | POST | /api/flashcards/generate | Generate AI flashcards for a topic |
-| POST | /api/pdf/process | Upload PDF and generate cards |
+| POST | /api/pdf/process | Upload PDF → chapter detection → flashcard generation |
 | POST | /api/notifications/send | Send FCM push notification |
 | POST | /api/leaderboard/update | Recalculate weekly rankings |
 
 All `/api/*` routes require `Authorization: Bearer <Firebase ID Token>` header.
+
+### POST `/api/flashcards/generate`
+**Body (JSON):**
+```json
+{
+  "topicId": "string",
+  "topicName": "string",
+  "domainId": "string",
+  "subjectId": "string",
+  "examTags": ["jee_mains"],
+  "difficulty": "mixed"
+}
+```
+Generates 30 flashcards and writes them to `domains/{domainId}/subjects/{subjectId}/topics/{topicId}/flashcards/`.
+Skips generation if cards already exist.
+
+### POST `/api/pdf/process`
+**Body (multipart/form-data):**
+```
+pdf      — PDF file (max 20 MB)
+uploadId — string (UUID, created by client)
+topicName — string
+domainId  — string
+```
+**Flow:**
+1. Extracts text from PDF (pdf-parse)
+2. Sends text to Gemini 1.5 Flash → detects 2–8 logical chapters
+3. For each chapter, generates 5–12 flashcards (mix of types)
+4. Writes to Firestore:
+   - `uploads/{uploadId}/chapters/{chapterId}` — chapter title, order, cardCount
+   - `uploads/{uploadId}/chapters/{chapterId}/cards/{cardId}` — individual cards
+5. Updates `uploads/{uploadId}` with `status: 'completed'`, `pageCount`, `generatedCardCount`
+
+**Response:**
+```json
+{
+  "success": true,
+  "cardCount": 48,
+  "pageCount": 12,
+  "chapterCount": 6
+}
+```
 
 ## Update Flutter .env
 After deploying, update `.env` in the Flutter project root:
