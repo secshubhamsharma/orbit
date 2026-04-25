@@ -7,6 +7,7 @@ import 'package:orbitapp/models/card_schedule_model.dart';
 import 'package:orbitapp/models/domain_model.dart';
 import 'package:orbitapp/models/flashcard_model.dart';
 import 'package:orbitapp/models/leaderboard_model.dart';
+import 'package:orbitapp/models/pdf_chapter_model.dart';
 import 'package:orbitapp/models/pdf_upload_model.dart';
 import 'package:orbitapp/models/progress_model.dart';
 import 'package:orbitapp/models/review_session_model.dart';
@@ -498,6 +499,78 @@ class FirestoreService {
     // Sort newest-first in memory — equivalent to orderBy('uploadedAt', descending: true)
     models.sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
     return models;
+  }
+
+  // ---------------------------------------------------------------------------
+  // PDF Chapters (extracted by the AI server from uploaded PDFs)
+  // Stored at: uploads/{uploadId}/chapters/{chapterId}
+  //            uploads/{uploadId}/chapters/{chapterId}/cards/{cardId}
+  // ---------------------------------------------------------------------------
+
+  Future<List<PdfChapterModel>> getUploadChapters(String uploadId) async {
+    final snap = await _db
+        .collection('uploads')
+        .doc(uploadId)
+        .collection('chapters')
+        .get();
+
+    final chapters = snap.docs.map((d) {
+      final data = _clean(d.data());
+      return PdfChapterModel.fromJson(d.id, data);
+    }).toList();
+
+    // Sort by order field ascending
+    chapters.sort((a, b) => a.order.compareTo(b.order));
+    return chapters;
+  }
+
+  Future<List<FlashcardModel>> getUploadChapterCards(
+      String uploadId, String chapterId) async {
+    final snap = await _db
+        .collection('uploads')
+        .doc(uploadId)
+        .collection('chapters')
+        .doc(chapterId)
+        .collection('cards')
+        .get();
+
+    final cards = <FlashcardModel>[];
+    for (final d in snap.docs) {
+      try {
+        final data = _clean(d.data());
+        data['id'] ??= d.id;
+        data['topicId'] ??= chapterId;
+        data['createdAt'] ??= DateTime.now().toIso8601String();
+        cards.add(FlashcardModel.fromJson(data));
+      } catch (_) {
+        // Skip malformed cards
+      }
+    }
+    return cards;
+  }
+
+  /// Fallback: load all cards from uploads/{uploadId}/flashcards/ when the
+  /// server has not created per-chapter subcollections.
+  Future<List<FlashcardModel>> getUploadAllCards(String uploadId) async {
+    final snap = await _db
+        .collection('uploads')
+        .doc(uploadId)
+        .collection('flashcards')
+        .get();
+
+    final cards = <FlashcardModel>[];
+    for (final d in snap.docs) {
+      try {
+        final data = _clean(d.data());
+        data['id'] ??= d.id;
+        data['topicId'] ??= uploadId;
+        data['createdAt'] ??= DateTime.now().toIso8601String();
+        cards.add(FlashcardModel.fromJson(data));
+      } catch (_) {
+        // Skip malformed cards
+      }
+    }
+    return cards;
   }
 
   // ---------------------------------------------------------------------------
