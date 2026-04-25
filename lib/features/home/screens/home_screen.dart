@@ -213,7 +213,7 @@ class _GreetingHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _greeting(),
+                  '${_greeting()} 👋',
                   style: AppTextStyles.bodyMedium
                       .copyWith(color: AppColors.kTextSecondary),
                 ),
