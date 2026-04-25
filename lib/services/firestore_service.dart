@@ -260,9 +260,41 @@ class FirestoreService {
         .orderBy('startedAt', descending: true)
         .limit(limit)
         .get();
-    return snap.docs
-        .map((d) => ReviewSessionModel.fromJson(_clean(d.data())))
-        .toList();
+    final results = <ReviewSessionModel>[];
+    for (final d in snap.docs) {
+      try {
+        final data = _clean(d.data());
+        data['sessionId'] ??= d.id;
+        data['topicId'] ??= '';
+        results.add(ReviewSessionModel.fromJson(data));
+      } catch (_) {}
+    }
+    return results;
+  }
+
+  /// Returns cards-reviewed counts for each of the last [days] days.
+  /// Index 0 = oldest day, index [days-1] = today.
+  Future<List<int>> getWeeklyActivity(String uid, {int days = 7}) async {
+    final now = DateTime.now();
+    final since = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: days - 1));
+    // Fetch without orderBy to avoid requiring an index on startedAt alone.
+    final snap = await _sessions(uid).get();
+    final counts = List<int>.filled(days, 0);
+    for (final d in snap.docs) {
+      try {
+        final data = _clean(d.data());
+        final raw = data['startedAt'];
+        DateTime? dt;
+        if (raw is String) dt = DateTime.tryParse(raw);
+        if (dt == null) continue;
+        final dayIndex = dt.difference(since).inDays;
+        if (dayIndex >= 0 && dayIndex < days) {
+          counts[dayIndex] += (data['cardsReviewed'] as num?)?.toInt() ?? 0;
+        }
+      } catch (_) {}
+    }
+    return counts;
   }
 
   // ---------------------------------------------------------------------------
