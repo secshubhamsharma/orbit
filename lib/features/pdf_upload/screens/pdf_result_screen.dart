@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -7,317 +10,617 @@ import 'package:orbitapp/core/constants/app_spacing.dart';
 import 'package:orbitapp/core/constants/app_text_styles.dart';
 import 'package:orbitapp/models/flashcard_model.dart';
 import 'package:orbitapp/providers/pdf_upload_provider.dart';
+import 'package:orbitapp/providers/quiz_progress_provider.dart';
 
-class PdfResultScreen extends ConsumerWidget {
-  final String uploadId;
-  final Map<String, String>? extra;
+// ─── Data ────────────────────────────────────────────────────────────────────
 
+class _Answer {
+  const _Answer({
+    required this.cardId,
+    required this.cardType,
+    required this.correct,
+  });
+  final String cardId;
+  final String cardType;
+  final bool correct;
+}
+
+// ─── Entry widget ─────────────────────────────────────────────────────────────
+
+class PdfResultScreen extends ConsumerStatefulWidget {
   const PdfResultScreen({
     super.key,
     required this.uploadId,
     this.extra,
   });
 
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final chapterId = extra?['chapterId'] ?? '';
-    final chapterTitle = extra?['chapterTitle'] ?? 'Practice';
+  final String uploadId;
+  final Map<String, String>? extra;
 
-    final cardsAsync = ref.watch(chapterCardsProvider(
-      (uploadId: uploadId, chapterId: chapterId),
-    ));
+  @override
+  ConsumerState<PdfResultScreen> createState() => _PdfResultScreenState();
+}
+
+class _PdfResultScreenState extends ConsumerState<PdfResultScreen> {
+  /// When non-null the quiz retries only these cards (wrong cards from last run).
+  List<FlashcardModel>? _retryCards;
+
+  void _handleRetry(List<FlashcardModel> wrongCards) =>
+      setState(() => _retryCards = wrongCards);
+
+  @override
+  Widget build(BuildContext context) {
+    final chapterId = widget.extra?['chapterId'] ?? '';
+    final chapterTitle = widget.extra?['chapterTitle'] ?? 'Practice';
+
+    final cardsAsync = ref.watch(
+      chapterCardsProvider((uploadId: widget.uploadId, chapterId: chapterId)),
+    );
 
     return Scaffold(
       backgroundColor: AppColors.kBackground,
-      body: SafeArea(
-        child: cardsAsync.when(
-          loading: () => const Center(
-            child: CircularProgressIndicator(color: AppColors.kPrimary),
-          ),
-          error: (e, _) => _ErrorView(
-            onRetry: () => ref.invalidate(chapterCardsProvider(
-              (uploadId: uploadId, chapterId: chapterId),
-            )),
-          ),
-          data: (cards) {
-            if (cards.isEmpty) {
-              return _EmptyView(chapterTitle: chapterTitle);
-            }
-            return _PracticeView(
-              cards: cards,
-              chapterTitle: chapterTitle,
-            );
-          },
+      body: cardsAsync.when(
+        loading: () => const _LoadingView(),
+        error: (_, __) => _ErrorView(
+          onRetry: () => ref.invalidate(chapterCardsProvider(
+            (uploadId: widget.uploadId, chapterId: chapterId),
+          )),
         ),
+        data: (allCards) {
+          if (allCards.isEmpty) {
+            return _EmptyView(chapterTitle: chapterTitle);
+          }
+          final activeCards = _retryCards ?? allCards;
+          return _QuizSession(
+            // Changing the key forces a full rebuild when retry cards change.
+            key: ObjectKey(_retryCards),
+            cards: activeCards,
+            allCards: allCards,
+            uploadId: widget.uploadId,
+            chapterId: chapterId,
+            chapterTitle: chapterTitle,
+            onRetry: _handleRetry,
+          );
+        },
       ),
     );
   }
 }
 
-class _PracticeView extends StatefulWidget {
-  const _PracticeView({
+// ─── Quiz session ─────────────────────────────────────────────────────────────
+
+class _QuizSession extends ConsumerStatefulWidget {
+  const _QuizSession({
+    super.key,
     required this.cards,
+    required this.allCards,
+    required this.uploadId,
+    required this.chapterId,
     required this.chapterTitle,
+    required this.onRetry,
   });
 
   final List<FlashcardModel> cards;
+  final List<FlashcardModel> allCards;
+  final String uploadId;
+  final String chapterId;
   final String chapterTitle;
+  final void Function(List<FlashcardModel> wrongCards) onRetry;
 
   @override
-  State<_PracticeView> createState() => _PracticeViewState();
+  ConsumerState<_QuizSession> createState() => _QuizSessionState();
 }
 
-class _PracticeViewState extends State<_PracticeView>
-    with SingleTickerProviderStateMixin {
-  int _index = 0;
-  int? _selectedOption;
-  bool _revealed = false;
-  final Map<String, String> _ratings = {};
+class _QuizSessionState extends ConsumerState<_QuizSession>
+    with TickerProviderStateMixin {
+  // ── Phase ──────────────────────────────────────────────────────────────────
+  bool _showResults = false;
 
-  late final AnimationController _transitionCtrl;
-  late final Animation<double> _fade;
-  late final Animation<Offset> _slide;
+  // ── Per-card state ─────────────────────────────────────────────────────────
+  int _index = 0;
+  final List<_Answer> _answers = [];
+  int? _chosenIndex;   // selected option index (MCQ / True-False)
+  bool _revealed = false; // answer shown (flashcard / fill_blank)
+  bool _isAnswered = false;
+
+  // ── Animations ─────────────────────────────────────────────────────────────
+  late final AnimationController _cardCtrl;
+  late final Animation<double> _cardOpacity;
+  late final Animation<Offset> _cardSlide;
+
+  late final AnimationController _btnCtrl;
+  late final Animation<double> _btnOpacity;
+  late final Animation<Offset> _btnSlide;
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+
+  FlashcardModel get _card => widget.cards[_index];
+
+  bool get _isMcqLike =>
+      _card.type == 'mcq' || _card.type == 'true_false';
+
+  List<String> get _options {
+    if (_card.type == 'mcq') return _card.options;
+    if (_card.type == 'true_false') return ['True', 'False'];
+    return [];
+  }
+
+  int? get _correctIndex {
+    if (_card.type == 'mcq') return _card.correctOption;
+    if (_card.type == 'true_false') {
+      return _card.back.trim().toLowerCase() == 'true' ? 0 : 1;
+    }
+    return null;
+  }
+
+  double get _progress =>
+      widget.cards.isEmpty ? 0 : (_index + 1) / widget.cards.length;
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
-    _transitionCtrl = AnimationController(
+
+    _cardCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 380),
+      duration: const Duration(milliseconds: 300),
     )..forward();
-    _fade = CurvedAnimation(parent: _transitionCtrl, curve: Curves.easeOut);
-    _slide = Tween<Offset>(
-      begin: const Offset(0.08, 0),
+
+    _cardOpacity =
+        CurvedAnimation(parent: _cardCtrl, curve: Curves.easeOut);
+    _cardSlide = Tween<Offset>(
+      begin: const Offset(0.06, 0),
       end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _transitionCtrl,
-      curve: Curves.easeOutCubic,
-    ));
+    ).animate(CurvedAnimation(parent: _cardCtrl, curve: Curves.easeOutCubic));
+
+    _btnCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 240),
+    );
+    _btnOpacity = CurvedAnimation(parent: _btnCtrl, curve: Curves.easeOut);
+    _btnSlide = Tween<Offset>(
+      begin: const Offset(0, 0.6),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _btnCtrl, curve: Curves.easeOutCubic));
   }
 
   @override
   void dispose() {
-    _transitionCtrl.dispose();
+    _cardCtrl.dispose();
+    _btnCtrl.dispose();
     super.dispose();
   }
 
-  bool get _isDone => _index >= widget.cards.length;
+  // ── Interaction ─────────────────────────────────────────────────────────────
 
-  Future<void> _goNext(String rating) async {
-    final card = widget.cards[_index];
-    _ratings[card.id] = rating;
+  void _onOptionTap(int index) {
+    if (_isAnswered) return;
+    final correct = index == _correctIndex;
+    correct
+        ? HapticFeedback.lightImpact()
+        : HapticFeedback.mediumImpact();
 
+    setState(() {
+      _chosenIndex = index;
+      _isAnswered = true;
+    });
+
+    Future.delayed(const Duration(milliseconds: 450), () {
+      if (mounted) _btnCtrl.forward();
+    });
+  }
+
+  void _onReveal() {
+    HapticFeedback.selectionClick();
+    setState(() => _revealed = true);
+  }
+
+  void _onSelfRate(bool correct) {
+    if (_isAnswered) return;
+    correct
+        ? HapticFeedback.lightImpact()
+        : HapticFeedback.mediumImpact();
+
+    _answers.add(_Answer(
+      cardId: _card.id,
+      cardType: _card.type,
+      correct: correct,
+    ));
+    setState(() => _isAnswered = true);
+
+    // Brief visual pause then advance
+    Future.delayed(const Duration(milliseconds: 300), _advance);
+  }
+
+  Future<void> _goNext() async {
+    // Record MCQ / T-F answer
+    _answers.add(_Answer(
+      cardId: _card.id,
+      cardType: _card.type,
+      correct: _chosenIndex != null && _chosenIndex == _correctIndex,
+    ));
+    await _advance();
+  }
+
+  Future<void> _advance() async {
     if (_index >= widget.cards.length - 1) {
-      setState(() => _index = widget.cards.length);
+      _finish();
       return;
     }
 
-    await _transitionCtrl.reverse();
+    await _cardCtrl.reverse();
     if (!mounted) return;
 
     setState(() {
       _index++;
-      _selectedOption = null;
+      _chosenIndex = null;
+      _isAnswered = false;
       _revealed = false;
     });
-
-    _transitionCtrl.forward(from: 0);
+    _btnCtrl.reset();
+    _cardCtrl.forward();
   }
 
-  void _selectMcq(int index) {
-    if (_revealed) return;
-    setState(() {
-      _selectedOption = index;
-      _revealed = true;
-    });
+  void _finish() {
+    final correct = _answers.where((a) => a.correct).length;
+    ref.read(chapterProgressProvider.notifier).save(
+      uploadId: widget.uploadId,
+      chapterId: widget.chapterId,
+      totalCards: widget.allCards.length,
+      correctCount: correct,
+    );
+    setState(() => _showResults = true);
   }
 
-  void _revealAnswer() {
-    if (_revealed) return;
-    setState(() => _revealed = true);
-  }
+  // ── Build ───────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    if (_isDone) {
-      return _ResultSummary(
-        cards: widget.cards,
-        ratings: _ratings,
+    if (_showResults) {
+      return _ResultsScreen(
+        answers: _answers,
+        allCards: widget.cards,
         chapterTitle: widget.chapterTitle,
+        onRetry: () {
+          final wrongIds = _answers
+              .where((a) => !a.correct)
+              .map((a) => a.cardId)
+              .toSet();
+          final wrongCards = widget.allCards
+              .where((c) => wrongIds.contains(c.id))
+              .toList();
+          widget.onRetry(wrongCards);
+        },
       );
     }
 
-    final card = widget.cards[_index];
-    final progress = (_index + 1) / widget.cards.length;
-
-    return Column(
-      children: [
-        _Header(
-          chapterTitle: widget.chapterTitle,
-          current: _index + 1,
-          total: widget.cards.length,
-          progress: progress,
-        ),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.pagePadding,
-              AppSpacing.lg,
-              AppSpacing.pagePadding,
-              AppSpacing.lg,
-            ),
-            child: FadeTransition(
-              opacity: _fade,
-              child: SlideTransition(
-                position: _slide,
-                child: _QuestionPanel(
-                  key: ValueKey(card.id),
-                  card: card,
-                  selectedOption: _selectedOption,
-                  revealed: _revealed,
-                  onSelectOption: _selectMcq,
-                  onRevealAnswer: _revealAnswer,
+    return Scaffold(
+      backgroundColor: AppColors.kBackground,
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildHeader(context),
+            Expanded(
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.pagePadding,
+                  AppSpacing.sm,
+                  AppSpacing.pagePadding,
+                  AppSpacing.lg,
+                ),
+                child: FadeTransition(
+                  opacity: _cardOpacity,
+                  child: SlideTransition(
+                    position: _cardSlide,
+                    child: _QuizCard(
+                      key: ValueKey('card_$_index'),
+                      card: _card,
+                      options: _options,
+                      correctIndex: _correctIndex,
+                      chosenIndex: _chosenIndex,
+                      isAnswered: _isAnswered,
+                      isRevealed: _revealed,
+                      isMcqLike: _isMcqLike,
+                      onOptionTap: _onOptionTap,
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
+            _buildBottomBar(context),
+          ],
         ),
-        _ActionBar(
-          card: card,
-          selectedOption: _selectedOption,
-          revealed: _revealed,
-          onContinue: () {
-            final rating = _ratingForCard(card);
-            _goNext(rating);
-          },
-          onRevealAnswer: _revealAnswer,
-        ),
-        const SizedBox(height: AppSpacing.lg),
-      ],
+      ),
     );
   }
 
-  String _ratingForCard(FlashcardModel card) {
-    if (card.type == 'mcq') {
-      final isCorrect = _selectedOption != null &&
-          _selectedOption == card.correctOption;
-      return isCorrect ? 'good' : 'again';
-    }
+  // ── Header ──────────────────────────────────────────────────────────────────
 
-    return 'good';
-  }
-}
-
-class _Header extends StatelessWidget {
-  const _Header({
-    required this.chapterTitle,
-    required this.current,
-    required this.total,
-    required this.progress,
-  });
-
-  final String chapterTitle;
-  final int current;
-  final int total;
-  final double progress;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.lg,
-            AppSpacing.md,
-            AppSpacing.lg,
-            AppSpacing.md,
-          ),
-          child: Row(
+  Widget _buildHeader(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.pagePadding,
+        AppSpacing.md,
+        AppSpacing.pagePadding,
+        AppSpacing.sm,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
               GestureDetector(
-                onTap: () => context.pop(),
+                onTap: () =>
+                    context.canPop() ? context.pop() : context.go('/home'),
                 child: Container(
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
                     color: AppColors.kSurface,
-                    borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                    borderRadius:
+                        BorderRadius.circular(AppSpacing.radiusSm),
                     border: Border.all(color: AppColors.kBorder),
                   ),
-                  child: const Icon(
-                    Icons.arrow_back_ios_new_rounded,
-                    size: 16,
-                    color: AppColors.kTextPrimary,
-                  ),
+                  child: const Icon(Icons.arrow_back_ios_new_rounded,
+                      size: 16, color: AppColors.kTextPrimary),
                 ),
               ),
               const SizedBox(width: AppSpacing.md),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      chapterTitle,
-                      style: AppTextStyles.headingSmall,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Question $current of $total',
-                      style: AppTextStyles.caption
-                          .copyWith(color: AppColors.kTextSecondary),
-                    ),
-                  ],
+                child: Text(
+                  widget.chapterTitle,
+                  style: AppTextStyles.labelLarge,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.kSurfaceVariant,
+                  borderRadius:
+                      BorderRadius.circular(AppSpacing.radiusFull),
+                ),
+                child: Text(
+                  '${_index + 1} / ${widget.cards.length}',
+                  style: AppTextStyles.labelSmall.copyWith(
+                      color: AppColors.kTextPrimary),
                 ),
               ),
             ],
           ),
-        ),
-        Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: AppSpacing.pagePadding),
-          child: ClipRRect(
+          const SizedBox(height: AppSpacing.md),
+          ClipRRect(
             borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
-            child: LinearProgressIndicator(
-              value: progress,
-              backgroundColor: AppColors.kSurfaceVariant,
-              valueColor: const AlwaysStoppedAnimation(AppColors.kPrimary),
-              minHeight: 6,
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: _progress),
+              duration: const Duration(milliseconds: 450),
+              curve: Curves.easeInOut,
+              builder: (_, value, __) => LinearProgressIndicator(
+                value: value,
+                minHeight: 5,
+                backgroundColor: AppColors.kSurfaceVariant,
+                valueColor:
+                    const AlwaysStoppedAnimation(AppColors.kPrimary),
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
+  }
+
+  // ── Bottom action bar ────────────────────────────────────────────────────────
+
+  Widget _buildBottomBar(BuildContext context) {
+    // Flashcard — before reveal
+    if (!_isMcqLike && !_revealed) {
+      return _BottomPad(
+        child: _ActionButton(
+          label: 'Show Answer',
+          icon: Icons.expand_more_rounded,
+          color: AppColors.kSurface,
+          textColor: AppColors.kTextPrimary,
+          borderColor: AppColors.kBorder,
+          onTap: _onReveal,
+        ),
+      );
+    }
+
+    // Flashcard — after reveal, self-rate
+    if (!_isMcqLike && _revealed && !_isAnswered) {
+      return _BottomPad(
+        child: Row(
+          children: [
+            Expanded(
+              child: _ActionButton(
+                label: "Didn't know",
+                icon: Icons.close_rounded,
+                color: AppColors.kErrorContainer,
+                textColor: AppColors.kError,
+                borderColor: AppColors.kError.withValues(alpha: 0.3),
+                onTap: () => _onSelfRate(false),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: _ActionButton(
+                label: 'Got it!',
+                icon: Icons.check_rounded,
+                color: AppColors.kSuccessContainer,
+                textColor: AppColors.kSuccess,
+                borderColor: AppColors.kSuccess.withValues(alpha: 0.3),
+                onTap: () => _onSelfRate(true),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // MCQ / T-F — after answering
+    if (_isMcqLike && _isAnswered) {
+      final wasCorrect = _chosenIndex == _correctIndex;
+      return _BottomPad(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Feedback banner
+            FadeTransition(
+              opacity: _btnOpacity,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                    vertical: AppSpacing.md, horizontal: AppSpacing.lg),
+                margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                decoration: BoxDecoration(
+                  color: wasCorrect
+                      ? AppColors.kSuccessContainer
+                      : AppColors.kErrorContainer,
+                  borderRadius:
+                      BorderRadius.circular(AppSpacing.radiusMd),
+                  border: Border.all(
+                    color: wasCorrect
+                        ? AppColors.kSuccess.withValues(alpha: 0.35)
+                        : AppColors.kError.withValues(alpha: 0.35),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      wasCorrect
+                          ? Icons.check_circle_rounded
+                          : Icons.cancel_rounded,
+                      color: wasCorrect
+                          ? AppColors.kSuccess
+                          : AppColors.kError,
+                      size: 20,
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Text(
+                      wasCorrect
+                          ? 'Correct! Keep it up.'
+                          : 'Not quite. Review the correct answer.',
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: wasCorrect
+                            ? AppColors.kSuccess
+                            : AppColors.kError,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // Continue button
+            FadeTransition(
+              opacity: _btnOpacity,
+              child: SlideTransition(
+                position: _btnSlide,
+                child: _ActionButton(
+                  label: _index < widget.cards.length - 1
+                      ? 'Next Question'
+                      : 'See Results',
+                  icon: Icons.arrow_forward_rounded,
+                  color: AppColors.kPrimary,
+                  textColor: Colors.white,
+                  onTap: _goNext,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
   }
 }
 
-class _QuestionPanel extends StatelessWidget {
-  const _QuestionPanel({
+// ─── Quiz card ────────────────────────────────────────────────────────────────
+
+class _QuizCard extends StatefulWidget {
+  const _QuizCard({
     super.key,
     required this.card,
-    required this.selectedOption,
-    required this.revealed,
-    required this.onSelectOption,
-    required this.onRevealAnswer,
+    required this.options,
+    required this.correctIndex,
+    required this.chosenIndex,
+    required this.isAnswered,
+    required this.isRevealed,
+    required this.isMcqLike,
+    required this.onOptionTap,
   });
 
   final FlashcardModel card;
-  final int? selectedOption;
-  final bool revealed;
-  final ValueChanged<int> onSelectOption;
-  final VoidCallback onRevealAnswer;
+  final List<String> options;
+  final int? correctIndex;
+  final int? chosenIndex;
+  final bool isAnswered;
+  final bool isRevealed;
+  final bool isMcqLike;
+  final ValueChanged<int> onOptionTap;
+
+  @override
+  State<_QuizCard> createState() => _QuizCardState();
+}
+
+class _QuizCardState extends State<_QuizCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _optCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _optCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    )..forward();
+  }
+
+  @override
+  void dispose() {
+    _optCtrl.dispose();
+    super.dispose();
+  }
+
+  Animation<double> _optionAnim(int i) => CurvedAnimation(
+        parent: _optCtrl,
+        curve: Interval(i * 0.11, (i * 0.11 + 0.55).clamp(0, 1.0),
+            curve: Curves.easeOutCubic),
+      );
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildQuestionCard(),
+        const SizedBox(height: AppSpacing.lg),
+        if (widget.isMcqLike) _buildOptions(),
+        if (!widget.isMcqLike) _buildFlashcardAnswer(),
+      ],
+    );
+  }
+
+  // ── Question card ──────────────────────────────────────────────────────────
+
+  Widget _buildQuestionCard() {
+    final accent = _accentColor(widget.card.type);
+
     return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.xl),
       decoration: BoxDecoration(
         color: AppColors.kSurface,
         borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
         border: Border.all(color: AppColors.kBorder),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.18),
+            color: Colors.black.withValues(alpha: 0.25),
             blurRadius: 24,
             offset: const Offset(0, 8),
           ),
@@ -325,693 +628,804 @@ class _QuestionPanel extends StatelessWidget {
       ),
       child: Stack(
         children: [
+          // Accent glow
           Positioned(
             top: -30,
-            right: -10,
+            right: -20,
             child: Container(
-              width: 120,
-              height: 120,
+              width: 110,
+              height: 110,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    _accentForType(card.type).withValues(alpha: 0.22),
-                    _accentForType(card.type).withValues(alpha: 0.0),
-                  ],
-                ),
+                gradient: RadialGradient(colors: [
+                  accent.withValues(alpha: 0.22),
+                  Colors.transparent,
+                ]),
               ),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.all(AppSpacing.xl),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.md,
-                        vertical: AppSpacing.xs,
-                      ),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            _accentForType(card.type).withValues(alpha: 0.22),
-                            AppColors.kSecondary.withValues(alpha: 0.12),
-                          ],
-                        ),
-                        borderRadius:
-                            BorderRadius.circular(AppSpacing.radiusFull),
-                        border: Border.all(
-                          color: _accentForType(card.type)
-                              .withValues(alpha: 0.18),
-                        ),
-                      ),
-                      child: Text(
-                        _labelForType(card.type),
-                        style: AppTextStyles.labelSmall.copyWith(
-                          color: _accentForType(card.type),
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.7,
-                        ),
-                      ),
-                    ),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.sm,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _difficultyColor(card.difficulty)
-                            .withValues(alpha: 0.12),
-                        borderRadius:
-                            BorderRadius.circular(AppSpacing.radiusFull),
-                      ),
-                      child: Text(
-                        _titleCase(card.difficulty),
-                        style: AppTextStyles.labelSmall.copyWith(
-                          color: _difficultyColor(card.difficulty),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.xl),
-                if (card.type == 'mcq')
-                  Row(
-                    children: [
-                      Container(
-                        width: 38,
-                        height: 38,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              _accentForType(card.type),
-                              AppColors.kSecondary,
-                            ],
-                          ),
-                          borderRadius:
-                              BorderRadius.circular(AppSpacing.radiusMd),
-                        ),
-                        child: const Icon(Icons.quiz_rounded,
-                            color: Colors.white, size: 18),
-                      ),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: Text(
-                          'Choose the best answer before continuing.',
-                          style: AppTextStyles.bodySmall.copyWith(
-                            color: AppColors.kTextSecondary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                if (card.type == 'mcq')
-                  const SizedBox(height: AppSpacing.lg),
-                Expanded(
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    child: Column(
-                      children: [
-                        Text(
-                          card.front,
-                          style: AppTextStyles.cardFront.copyWith(
-                            fontWeight: FontWeight.w700,
-                            height: 1.32,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: AppSpacing.xl),
-                        if (card.type == 'mcq' && card.options.isNotEmpty)
-                          ...card.options.asMap().entries.map((entry) {
-                            return _OptionTile(
-                              index: entry.key,
-                              text: entry.value,
-                              selected: selectedOption == entry.key,
-                              revealed: revealed,
-                              isCorrect: card.correctOption == entry.key,
-                              accent: _accentForType(card.type),
-                              onTap: () => onSelectOption(entry.key),
-                            );
-                          })
-                        else
-                          _RevealAnswerPanel(
-                            card: card,
-                            revealed: revealed,
-                            onRevealAnswer: onRevealAnswer,
-                          ),
-                        if (revealed &&
-                            card.explanation != null &&
-                            card.explanation!.trim().isNotEmpty) ...[
-                          const SizedBox(height: AppSpacing.lg),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(AppSpacing.md),
-                            decoration: BoxDecoration(
-                              color: AppColors.kBackground.withValues(alpha: 0.32),
-                              borderRadius:
-                                  BorderRadius.circular(AppSpacing.radiusLg),
-                              border: Border.all(color: AppColors.kBorder),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Icon(
-                                  Icons.auto_awesome_rounded,
-                                  size: 16,
-                                  color: AppColors.kTextSecondary,
-                                ),
-                                const SizedBox(width: AppSpacing.sm),
-                                Expanded(
-                                  child: Text(
-                                    card.explanation!,
-                                    style: AppTextStyles.bodySmall,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OptionTile extends StatelessWidget {
-  const _OptionTile({
-    required this.index,
-    required this.text,
-    required this.selected,
-    required this.revealed,
-    required this.isCorrect,
-    required this.accent,
-    required this.onTap,
-  });
-
-  final int index;
-  final String text;
-  final bool selected;
-  final bool revealed;
-  final bool isCorrect;
-  final Color accent;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final isWrongSelection = revealed && selected && !isCorrect;
-    final borderColor = revealed
-        ? isCorrect
-            ? AppColors.kSuccess
-            : isWrongSelection
-                ? AppColors.kError
-                : AppColors.kBorder
-        : selected
-            ? accent
-            : AppColors.kBorder;
-
-    final background = revealed
-        ? isCorrect
-            ? AppColors.kSuccessContainer.withValues(alpha: 0.55)
-            : isWrongSelection
-                ? AppColors.kErrorContainer.withValues(alpha: 0.55)
-                : AppColors.kSurfaceVariant
-        : selected
-            ? accent.withValues(alpha: 0.12)
-            : AppColors.kSurfaceVariant;
-
-    final badgeGradient = revealed && isCorrect
-        ? [AppColors.kSuccess, AppColors.kSecondary]
-        : isWrongSelection
-            ? [AppColors.kError, const Color(0xFFFF8A8A)]
-            : [accent, AppColors.kSecondary];
-
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: Duration(milliseconds: 240 + (index * 55)),
-      curve: Curves.easeOutCubic,
-      builder: (context, value, child) {
-        return Opacity(
-          opacity: value,
-          child: Transform.translate(
-            offset: Offset((1 - value) * 24, 0),
-            child: child,
-          ),
-        );
-      },
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: AppSpacing.md),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: revealed ? null : onTap,
-              borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-              child: Ink(
-                decoration: BoxDecoration(
-                  color: background,
-                  borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-                  border:
-                      Border.all(color: borderColor, width: selected ? 1.5 : 1),
-                ),
-                padding: const EdgeInsets.all(AppSpacing.md),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 220),
-                      width: 36,
-                      height: 36,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(colors: badgeGradient),
-                        borderRadius:
-                            BorderRadius.circular(AppSpacing.radiusMd),
-                        boxShadow: [
-                          BoxShadow(
-                            color: badgeGradient.first.withValues(alpha: 0.2),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: revealed && isCorrect
-                          ? const Icon(Icons.check_rounded,
-                              color: Colors.white, size: 18)
-                          : revealed && isWrongSelection
-                              ? const Icon(Icons.close_rounded,
-                                  color: Colors.white, size: 18)
-                              : Text(
-                                  String.fromCharCode(65 + index),
-                                  style: AppTextStyles.labelMedium.copyWith(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text(
-                          text,
-                          style:
-                              AppTextStyles.bodyMedium.copyWith(height: 1.45),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _RevealAnswerPanel extends StatelessWidget {
-  const _RevealAnswerPanel({
-    required this.card,
-    required this.revealed,
-    required this.onRevealAnswer,
-  });
-
-  final FlashcardModel card;
-  final bool revealed;
-  final VoidCallback onRevealAnswer;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 260),
-      child: revealed
-          ? Container(
-              key: const ValueKey('answer'),
-              width: double.infinity,
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    AppColors.kSuccessContainer.withValues(alpha: 0.72),
-                    AppColors.kSurfaceVariant,
-                  ],
-                ),
-                borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
-                border: Border.all(
-                  color: AppColors.kSuccess.withValues(alpha: 0.24),
-                ),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.check_circle_rounded,
-                          size: 16, color: AppColors.kSuccess),
-                      const SizedBox(width: AppSpacing.xs),
-                      Text(
-                        'Answer',
-                        style: AppTextStyles.labelMedium.copyWith(
-                          color: AppColors.kSuccess,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  Text(
-                    card.back,
-                    style: AppTextStyles.bodyLarge.copyWith(height: 1.55),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            )
-          : Container(
-              key: const ValueKey('prompt'),
-              width: double.infinity,
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              decoration: BoxDecoration(
-                color: AppColors.kSurfaceVariant,
-                borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
-                border: Border.all(color: AppColors.kBorder),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    'Reveal the answer when you are ready.',
-                    style: AppTextStyles.bodyMedium.copyWith(
-                      color: AppColors.kTextSecondary,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                  FilledButton(
-                    onPressed: onRevealAnswer,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.kPrimary,
-                      shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(AppSpacing.radiusMd),
-                      ),
-                    ),
-                    child: Text(
-                      'Show Answer',
-                      style: AppTextStyles.labelMedium
-                          .copyWith(color: Colors.white),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-    );
-  }
-}
-
-class _ActionBar extends StatelessWidget {
-  const _ActionBar({
-    required this.card,
-    required this.selectedOption,
-    required this.revealed,
-    required this.onContinue,
-    required this.onRevealAnswer,
-  });
-
-  final FlashcardModel card;
-  final int? selectedOption;
-  final bool revealed;
-  final VoidCallback onContinue;
-  final VoidCallback onRevealAnswer;
-
-  @override
-  Widget build(BuildContext context) {
-    final canContinue =
-        card.type == 'mcq' ? revealed && selectedOption != null : revealed;
-
-    return Padding(
-      padding:
-          const EdgeInsets.symmetric(horizontal: AppSpacing.pagePadding),
-      child: Column(
-        children: [
-          if (card.type == 'mcq' && revealed)
-            Padding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.md),
-              child: Text(
-                selectedOption == card.correctOption
-                    ? 'Correct answer. Nice work.'
-                    : 'Answer revealed. Review the explanation and continue.',
-                style: AppTextStyles.bodySmall.copyWith(
-                  color: selectedOption == card.correctOption
-                      ? AppColors.kSuccess
-                      : AppColors.kTextSecondary,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          if (card.type != 'mcq' && !revealed)
-            Padding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.md),
-              child: Text(
-                'No flip card here. Reveal the answer when you are ready.',
-                style: AppTextStyles.caption
-                    .copyWith(color: AppColors.kTextDisabled),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          Row(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (card.type != 'mcq' && !revealed)
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: onRevealAnswer,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.kPrimary,
-                      side: const BorderSide(color: AppColors.kBorder),
-                      padding: const EdgeInsets.symmetric(
-                          vertical: AppSpacing.lg),
-                      shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(AppSpacing.radiusMd),
-                      ),
-                    ),
-                    child: Text(
-                      'Reveal Answer',
-                      style: AppTextStyles.labelLarge
-                          .copyWith(color: AppColors.kPrimary),
-                    ),
-                  ),
-                ),
-              if (card.type != 'mcq' && !revealed)
-                const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: FilledButton(
-                  onPressed: canContinue ? onContinue : null,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.kPrimary,
-                    disabledBackgroundColor:
-                        AppColors.kSurfaceVariant,
-                    padding:
-                        const EdgeInsets.symmetric(vertical: AppSpacing.lg),
-                    shape: RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.circular(AppSpacing.radiusMd),
-                    ),
-                  ),
-                  child: Text(
-                    'Continue',
-                    style: AppTextStyles.labelLarge.copyWith(
-                      color: canContinue
-                          ? Colors.white
-                          : AppColors.kTextDisabled,
-                    ),
-                  ),
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _TypeBadge(type: widget.card.type),
+                  const Spacer(),
+                  _DifficultyBadge(difficulty: widget.card.difficulty),
+                ],
               ),
+              const SizedBox(height: AppSpacing.xl),
+              Text(
+                widget.card.front,
+                style: AppTextStyles.headingSmall.copyWith(height: 1.5),
+              ),
+              if (widget.card.type == 'fill_blank') ...[
+                const SizedBox(height: AppSpacing.sm),
+                Row(children: [
+                  const Icon(Icons.edit_outlined,
+                      size: 12, color: AppColors.kTextDisabled),
+                  const SizedBox(width: 4),
+                  Text('Fill in the blank',
+                      style: AppTextStyles.caption),
+                ]),
+              ],
+              if (!widget.isMcqLike && widget.isRevealed) ...[
+                const SizedBox(height: AppSpacing.xl),
+                _buildAnswerReveal(),
+              ],
+              if (widget.card.explanation != null &&
+                  widget.card.explanation!.trim().isNotEmpty &&
+                  widget.isAnswered) ...[
+                const SizedBox(height: AppSpacing.lg),
+                _buildExplanation(),
+              ],
             ],
           ),
         ],
       ),
     );
   }
+
+  Widget _buildAnswerReveal() {
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        decoration: BoxDecoration(
+          color: AppColors.kSuccessContainer,
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+          border: Border.all(
+              color: AppColors.kSuccess.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Icon(Icons.lightbulb_outline_rounded,
+                  size: 14, color: AppColors.kSuccess),
+              const SizedBox(width: 6),
+              Text('Answer',
+                  style: AppTextStyles.labelSmall
+                      .copyWith(color: AppColors.kSuccess)),
+            ]),
+            const SizedBox(height: AppSpacing.sm),
+            Text(widget.card.back,
+                style: AppTextStyles.bodyLarge.copyWith(height: 1.5)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExplanation() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.kSurfaceVariant,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.kBorder),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.auto_awesome_rounded,
+              size: 14, color: AppColors.kTextSecondary),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              widget.card.explanation!,
+              style: AppTextStyles.bodySmall,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── MCQ options ─────────────────────────────────────────────────────────────
+
+  Widget _buildOptions() {
+    final labels =
+        widget.card.type == 'true_false' ? ['T', 'F'] : ['A', 'B', 'C', 'D'];
+
+    if (widget.card.type == 'true_false') {
+      return Row(
+        children: List.generate(widget.options.length, (i) {
+          return Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(
+                  right: i < widget.options.length - 1 ? AppSpacing.md : 0),
+              child: FadeTransition(
+                opacity: _optionAnim(i),
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.25),
+                    end: Offset.zero,
+                  ).animate(_optionAnim(i)),
+                  child: _OptionTile(
+                    label: labels[i],
+                    text: widget.options[i],
+                    index: i,
+                    isSelected: widget.chosenIndex == i,
+                    isCorrect: widget.correctIndex == i,
+                    isAnswered: widget.isAnswered,
+                    isTrueFalse: true,
+                    onTap: () => widget.onOptionTap(i),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
+      );
+    }
+
+    return Column(
+      children: List.generate(widget.options.length, (i) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: AppSpacing.md),
+          child: FadeTransition(
+            opacity: _optionAnim(i),
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, 0.25),
+                end: Offset.zero,
+              ).animate(_optionAnim(i)),
+              child: _OptionTile(
+                label: labels[i],
+                text: widget.options[i],
+                index: i,
+                isSelected: widget.chosenIndex == i,
+                isCorrect: widget.correctIndex == i,
+                isAnswered: widget.isAnswered,
+                isTrueFalse: false,
+                onTap: () => widget.onOptionTap(i),
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  // ── Flashcard answer (before/after reveal) ──────────────────────────────────
+
+  Widget _buildFlashcardAnswer() {
+    if (widget.isRevealed) return const SizedBox.shrink();
+    // Answer is shown inside the question card — nothing extra here
+    return const SizedBox.shrink();
+  }
 }
 
-class _ResultSummary extends StatefulWidget {
-  const _ResultSummary({
-    required this.cards,
-    required this.ratings,
-    required this.chapterTitle,
+// ─── Option tile ──────────────────────────────────────────────────────────────
+
+class _OptionTile extends StatelessWidget {
+  const _OptionTile({
+    required this.label,
+    required this.text,
+    required this.index,
+    required this.isSelected,
+    required this.isCorrect,
+    required this.isAnswered,
+    required this.isTrueFalse,
+    required this.onTap,
   });
 
-  final List<FlashcardModel> cards;
-  final Map<String, String> ratings;
-  final String chapterTitle;
+  final String label;
+  final String text;
+  final int index;
+  final bool isSelected;
+  final bool isCorrect;
+  final bool isAnswered;
+  final bool isTrueFalse;
+  final VoidCallback onTap;
 
   @override
-  State<_ResultSummary> createState() => _ResultSummaryState();
+  Widget build(BuildContext context) {
+    // Compute visual state
+    final bool showCorrect = isAnswered && isCorrect;
+    final bool showWrong = isAnswered && isSelected && !isCorrect;
+    final bool isDimmed = isAnswered && !isSelected && !isCorrect;
+
+    final Color borderColor = showCorrect
+        ? AppColors.kSuccess
+        : showWrong
+            ? AppColors.kError
+            : isSelected
+                ? AppColors.kPrimary
+                : AppColors.kBorder;
+
+    final Color bgColor = showCorrect
+        ? AppColors.kSuccess.withValues(alpha: 0.12)
+        : showWrong
+            ? AppColors.kError.withValues(alpha: 0.12)
+            : isSelected
+                ? AppColors.kPrimary.withValues(alpha: 0.1)
+                : AppColors.kSurface;
+
+    final Color badgeBg = showCorrect
+        ? AppColors.kSuccess
+        : showWrong
+            ? AppColors.kError
+            : isSelected
+                ? AppColors.kPrimary
+                : AppColors.kSurfaceVariant;
+
+    final Color textColor = isDimmed
+        ? AppColors.kTextDisabled
+        : AppColors.kTextPrimary;
+
+    Widget badgeChild;
+    if (showCorrect) {
+      badgeChild = const Icon(Icons.check_rounded,
+          size: 16, color: Colors.white);
+    } else if (showWrong) {
+      badgeChild = const Icon(Icons.close_rounded,
+          size: 16, color: Colors.white);
+    } else if (isTrueFalse) {
+      badgeChild = Icon(
+        index == 0 ? Icons.check_rounded : Icons.close_rounded,
+        size: 16,
+        color: (isSelected || showCorrect)
+            ? Colors.white
+            : AppColors.kTextSecondary,
+      );
+    } else {
+      badgeChild = Text(
+        label,
+        style: AppTextStyles.labelSmall.copyWith(
+          color: isSelected ? Colors.white : AppColors.kTextSecondary,
+          fontWeight: FontWeight.w700,
+        ),
+      );
+    }
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(
+          color: borderColor,
+          width: (isSelected || showCorrect) ? 1.5 : 1.0,
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: isAnswered ? null : onTap,
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+          splashColor: AppColors.kPrimary.withValues(alpha: 0.1),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: isTrueFalse ? AppSpacing.xl : AppSpacing.lg,
+            ),
+            child: isTrueFalse
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        width: 44,
+                        height: 44,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: badgeBg,
+                          shape: BoxShape.circle,
+                        ),
+                        child: badgeChild,
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(
+                        text,
+                        style: AppTextStyles.labelMedium
+                            .copyWith(color: textColor),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        width: 34,
+                        height: 34,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: badgeBg,
+                          borderRadius:
+                              BorderRadius.circular(AppSpacing.radiusSm),
+                        ),
+                        child: badgeChild,
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: Text(
+                          text,
+                          style: AppTextStyles.bodyMedium
+                              .copyWith(color: textColor, height: 1.4),
+                        ),
+                      ),
+                      if (showCorrect)
+                        const Padding(
+                          padding: EdgeInsets.only(left: AppSpacing.sm),
+                          child: Icon(Icons.check_circle_rounded,
+                              size: 18, color: AppColors.kSuccess),
+                        ),
+                    ],
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-class _ResultSummaryState extends State<_ResultSummary>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
+// ─── Results screen ───────────────────────────────────────────────────────────
+
+class _ResultsScreen extends StatefulWidget {
+  const _ResultsScreen({
+    required this.answers,
+    required this.allCards,
+    required this.chapterTitle,
+    required this.onRetry,
+  });
+
+  final List<_Answer> answers;
+  final List<FlashcardModel> allCards;
+  final String chapterTitle;
+  final VoidCallback onRetry;
+
+  @override
+  State<_ResultsScreen> createState() => _ResultsScreenState();
+}
+
+class _ResultsScreenState extends State<_ResultsScreen>
+    with TickerProviderStateMixin {
+  late final AnimationController _enterCtrl;
 
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(
+    _enterCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 700),
+      duration: const Duration(milliseconds: 900),
     )..forward();
   }
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    _enterCtrl.dispose();
     super.dispose();
   }
 
+  Animation<double> _stagger(double start, double end) => CurvedAnimation(
+        parent: _enterCtrl,
+        curve: Interval(start, end, curve: Curves.easeOutCubic),
+      );
+
   @override
   Widget build(BuildContext context) {
-    final total = widget.ratings.length;
-    final correct = widget.ratings.values
-        .where((rating) => rating == 'good' || rating == 'easy')
-        .length;
-    final accuracy = total > 0 ? (correct / total * 100).round() : 0;
+    final total = widget.answers.length;
+    final correct = widget.answers.where((a) => a.correct).length;
+    final wrong = total - correct;
+    final accuracy = total > 0 ? correct / total : 0.0;
+    final accColor = _accuracyColor(accuracy);
+    final wrongAnswers = widget.answers.where((a) => !a.correct).toList();
 
-    final accColor = accuracy >= 80
-        ? AppColors.kSuccess
-        : accuracy >= 60
-            ? AppColors.kWarning
-            : AppColors.kError;
+    // Group by type
+    final Map<String, ({int correct, int total})> byType = {};
+    for (final ans in widget.answers) {
+      final label = _typeLabel(ans.cardType);
+      final prev = byType[label] ?? (correct: 0, total: 0);
+      byType[label] = (
+        correct: prev.correct + (ans.correct ? 1 : 0),
+        total: prev.total + 1,
+      );
+    }
 
-    return Padding(
-      padding: const EdgeInsets.all(AppSpacing.pagePadding),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          FadeTransition(
-            opacity: CurvedAnimation(
-              parent: _ctrl,
-              curve: const Interval(0.0, 0.5, curve: Curves.easeOut),
-            ),
-            child: Column(
-              children: [
-                Container(
-                  width: 84,
-                  height: 84,
-                  decoration: BoxDecoration(
-                    color: accColor.withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    accuracy >= 80
-                        ? Icons.emoji_events_rounded
-                        : accuracy >= 60
-                            ? Icons.thumb_up_rounded
-                            : Icons.refresh_rounded,
-                    size: 38,
-                    color: accColor,
+    return Scaffold(
+      backgroundColor: AppColors.kBackground,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.pagePadding, vertical: AppSpacing.lg),
+          child: Column(
+            children: [
+              // ── Header ──────────────────────────────────────────────────
+              FadeTransition(
+                opacity: _stagger(0.0, 0.4),
+                child: Column(
+                  children: [
+                    Text(
+                      accuracy >= 0.75
+                          ? '🎉 Excellent Work!'
+                          : accuracy >= 0.5
+                              ? '👍 Good Effort!'
+                              : '💪 Keep Practising!',
+                      style: AppTextStyles.headingMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      widget.chapterTitle,
+                      style: AppTextStyles.bodyMedium
+                          .copyWith(color: AppColors.kTextSecondary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: AppSpacing.xxl),
+
+              // ── Accuracy ring ────────────────────────────────────────────
+              FadeTransition(
+                opacity: _stagger(0.1, 0.5),
+                child: TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0, end: accuracy),
+                  duration: const Duration(milliseconds: 1100),
+                  curve: Curves.easeOutCubic,
+                  builder: (context, value, _) {
+                    return SizedBox(
+                      width: 170,
+                      height: 170,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          CustomPaint(
+                            size: const Size(170, 170),
+                            painter: _RingPainter(
+                              progress: value,
+                              foreground:
+                                  _accuracyColor(value),
+                              background: AppColors.kSurfaceVariant,
+                            ),
+                          ),
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '${(value * 100).round()}%',
+                                style: AppTextStyles.displayMedium.copyWith(
+                                  color: _accuracyColor(value),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              Text('Accuracy',
+                                  style: AppTextStyles.caption),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+
+              const SizedBox(height: AppSpacing.xxl),
+
+              // ── Score row ────────────────────────────────────────────────
+              FadeTransition(
+                opacity: _stagger(0.25, 0.65),
+                child: Row(
+                  children: [
+                    Expanded(
+                        child: _StatCard(
+                      value: '$correct',
+                      label: 'Correct',
+                      icon: Icons.check_circle_rounded,
+                      color: AppColors.kSuccess,
+                    )),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                        child: _StatCard(
+                      value: '$wrong',
+                      label: 'Wrong',
+                      icon: Icons.cancel_rounded,
+                      color: AppColors.kError,
+                    )),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                        child: _StatCard(
+                      value: '$total',
+                      label: 'Total',
+                      icon: Icons.style_rounded,
+                      color: AppColors.kTextSecondary,
+                    )),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: AppSpacing.xl),
+
+              // ── Breakdown by type ────────────────────────────────────────
+              if (byType.length > 1) ...[
+                FadeTransition(
+                  opacity: _stagger(0.35, 0.75),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.kSurface,
+                      borderRadius:
+                          BorderRadius.circular(AppSpacing.radiusLg),
+                      border: Border.all(color: AppColors.kBorder),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                              AppSpacing.lg,
+                              AppSpacing.lg,
+                              AppSpacing.lg,
+                              AppSpacing.sm),
+                          child: Text('Breakdown by type',
+                              style: AppTextStyles.labelMedium.copyWith(
+                                  color: AppColors.kTextSecondary)),
+                        ),
+                        ...byType.entries.map((e) => _TypeRow(
+                              typeName: e.key,
+                              correct: e.value.correct,
+                              total: e.value.total,
+                            )),
+                        const SizedBox(height: AppSpacing.sm),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: AppSpacing.lg),
-                Text('Practice Complete',
-                    style: AppTextStyles.headingMedium),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  widget.chapterTitle,
-                  style: AppTextStyles.bodyMedium
-                      .copyWith(color: AppColors.kTextSecondary),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                const SizedBox(height: AppSpacing.xl),
               ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xxl),
-          FadeTransition(
-            opacity: CurvedAnimation(
-              parent: _ctrl,
-              curve: const Interval(0.2, 0.7, curve: Curves.easeOut),
-            ),
-            child: Container(
-              padding: const EdgeInsets.all(AppSpacing.xl),
-              decoration: BoxDecoration(
-                color: AppColors.kSurface,
-                borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
-                border: Border.all(color: AppColors.kBorder),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _StatCell(
-                    label: 'Accuracy',
-                    value: '$accuracy%',
-                    color: accColor,
-                  ),
-                  _StatCell(
-                    label: 'Correct',
-                    value: '$correct',
-                    color: AppColors.kSuccess,
-                  ),
-                  _StatCell(
-                    label: 'Total',
-                    value: '$total',
-                    color: AppColors.kTextSecondary,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xxl),
-          FadeTransition(
-            opacity: CurvedAnimation(
-              parent: _ctrl,
-              curve: const Interval(0.4, 0.9, curve: Curves.easeOut),
-            ),
-            child: Column(
-              children: [
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: () => context.pop(),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.kPrimary,
-                      padding: const EdgeInsets.symmetric(
-                          vertical: AppSpacing.lg),
-                      shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(AppSpacing.radiusMd),
+
+              // ── Actions ──────────────────────────────────────────────────
+              FadeTransition(
+                opacity: _stagger(0.5, 0.9),
+                child: Column(
+                  children: [
+                    if (wrongAnswers.isNotEmpty)
+                      _ActionButton(
+                        label:
+                            'Retry ${wrongAnswers.length} Wrong Question${wrongAnswers.length > 1 ? 's' : ''}',
+                        icon: Icons.refresh_rounded,
+                        color: AppColors.kPrimaryContainer,
+                        textColor: AppColors.kPrimaryLight,
+                        borderColor: AppColors.kPrimary.withValues(alpha: 0.3),
+                        onTap: widget.onRetry,
+                      ),
+                    if (wrongAnswers.isNotEmpty)
+                      const SizedBox(height: AppSpacing.md),
+                    _ActionButton(
+                      label: 'Back to Chapters',
+                      icon: Icons.arrow_back_rounded,
+                      color: AppColors.kSurface,
+                      textColor: AppColors.kTextPrimary,
+                      borderColor: AppColors.kBorder,
+                      onTap: () => Navigator.of(context).pop(),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    TextButton(
+                      onPressed: () => context.go('/home/profile/uploads'),
+                      child: Text(
+                        'My Uploads',
+                        style: AppTextStyles.labelMedium
+                            .copyWith(color: AppColors.kTextSecondary),
                       ),
                     ),
-                    child: Text(
-                      'Back to Chapters',
-                      style: AppTextStyles.labelLarge
-                          .copyWith(color: Colors.white),
-                    ),
-                  ),
+                  ],
                 ),
-                const SizedBox(height: AppSpacing.md),
-                TextButton(
-                  onPressed: () => context.go('/home/profile/uploads'),
-                  child: Text(
-                    'Open My Uploads',
-                    style: AppTextStyles.labelMedium
-                        .copyWith(color: AppColors.kTextSecondary),
-                  ),
-                ),
-              ],
+              ),
+
+              const SizedBox(height: AppSpacing.xl),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Ring painter ─────────────────────────────────────────────────────────────
+
+class _RingPainter extends CustomPainter {
+  const _RingPainter({
+    required this.progress,
+    required this.foreground,
+    required this.background,
+  });
+
+  final double progress;
+  final Color foreground;
+  final Color background;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) / 2 - 14;
+    const stroke = 14.0;
+
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..color = background
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke,
+    );
+
+    if (progress > 0) {
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        -math.pi / 2,
+        2 * math.pi * progress,
+        false,
+        Paint()
+          ..color = foreground
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = stroke
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RingPainter old) => old.progress != progress;
+}
+
+// ─── Small reusable widgets ───────────────────────────────────────────────────
+
+class _TypeBadge extends StatelessWidget {
+  const _TypeBadge({required this.type});
+  final String type;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _accentColor(type);
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Text(
+        _typeLabel(type).toUpperCase(),
+        style: AppTextStyles.labelSmall
+            .copyWith(color: color, letterSpacing: 0.8, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}
+
+class _DifficultyBadge extends StatelessWidget {
+  const _DifficultyBadge({required this.difficulty});
+  final String difficulty;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (difficulty.toLowerCase()) {
+      'easy' => AppColors.kDifficultyEasy,
+      'hard' => AppColors.kDifficultyHard,
+      _ => AppColors.kDifficultyMedium,
+    };
+    return Container(
+      padding:
+          const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
+      ),
+      child: Text(
+        difficulty[0].toUpperCase() + difficulty.substring(1),
+        style: AppTextStyles.labelSmall.copyWith(color: color),
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  const _StatCard({
+    required this.value,
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
+
+  final String value;
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          vertical: AppSpacing.lg, horizontal: AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.kSurface,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+        border: Border.all(color: AppColors.kBorder),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 22),
+          const SizedBox(height: 6),
+          Text(value,
+              style: AppTextStyles.headingMedium.copyWith(color: color)),
+          const SizedBox(height: 2),
+          Text(label, style: AppTextStyles.caption),
+        ],
+      ),
+    );
+  }
+}
+
+class _TypeRow extends StatelessWidget {
+  const _TypeRow({
+    required this.typeName,
+    required this.correct,
+    required this.total,
+  });
+
+  final String typeName;
+  final int correct;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = total > 0 ? correct / total : 0.0;
+    final color = _accuracyColor(pct);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.md),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(typeName,
+                style: AppTextStyles.bodySmall
+                    .copyWith(color: AppColors.kTextPrimary)),
+          ),
+          Text(
+            '$correct / $total',
+            style: AppTextStyles.labelSmall
+                .copyWith(color: AppColors.kTextSecondary),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          SizedBox(
+            width: 46,
+            child: Text(
+              '${(pct * 100).round()}%',
+              style: AppTextStyles.labelSmall.copyWith(
+                  color: color, fontWeight: FontWeight.w700),
+              textAlign: TextAlign.right,
             ),
           ),
         ],
@@ -1020,72 +1434,175 @@ class _ResultSummaryState extends State<_ResultSummary>
   }
 }
 
-class _StatCell extends StatelessWidget {
-  const _StatCell({
+class _ActionButton extends StatelessWidget {
+  const _ActionButton({
     required this.label,
-    required this.value,
+    required this.icon,
     required this.color,
+    required this.textColor,
+    this.borderColor,
+    required this.onTap,
   });
 
   final String label;
-  final String value;
+  final IconData icon;
   final Color color;
+  final Color textColor;
+  final Color? borderColor;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: AppTextStyles.headingMedium.copyWith(color: color),
+    return SizedBox(
+      width: double.infinity,
+      child: Material(
+        color: color,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+          child: Container(
+            padding:
+                const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+            decoration: borderColor != null
+                ? BoxDecoration(
+                    borderRadius:
+                        BorderRadius.circular(AppSpacing.radiusMd),
+                    border: Border.all(color: borderColor!),
+                  )
+                : null,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 18, color: textColor),
+                const SizedBox(width: AppSpacing.sm),
+                Text(label,
+                    style: AppTextStyles.labelLarge
+                        .copyWith(color: textColor)),
+              ],
+            ),
+          ),
         ),
-        const SizedBox(height: 2),
-        Text(label, style: AppTextStyles.caption),
-      ],
+      ),
     );
   }
 }
 
+class _RatingButton extends StatelessWidget {
+  const _RatingButton({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        child: Container(
+          padding:
+              const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+            border: Border.all(color: color.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 18, color: color),
+              const SizedBox(width: AppSpacing.sm),
+              Text(label,
+                  style: AppTextStyles.labelLarge.copyWith(color: color)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BottomPad extends StatelessWidget {
+  const _BottomPad({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.pagePadding,
+          AppSpacing.sm,
+          AppSpacing.pagePadding,
+          AppSpacing.pagePadding,
+        ),
+        child: child,
+      );
+}
+
+// ─── Empty / error / loading ──────────────────────────────────────────────────
+
+class _LoadingView extends StatelessWidget {
+  const _LoadingView();
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+        backgroundColor: AppColors.kBackground,
+        body: Center(
+            child: CircularProgressIndicator(color: AppColors.kPrimary)),
+      );
+}
+
 class _EmptyView extends StatelessWidget {
   const _EmptyView({required this.chapterTitle});
-
   final String chapterTitle;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.pagePadding),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.style_outlined,
-                size: 52, color: AppColors.kTextDisabled),
-            const SizedBox(height: AppSpacing.lg),
-            Text('No cards found', style: AppTextStyles.headingSmall),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'No practice questions were generated for "$chapterTitle" yet.',
-              style: AppTextStyles.bodyMedium
-                  .copyWith(color: AppColors.kTextSecondary),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            OutlinedButton(
-              onPressed: () => context.pop(),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: AppColors.kBorder),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+    return Scaffold(
+      backgroundColor: AppColors.kBackground,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.pagePadding),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.style_outlined,
+                    size: 52, color: AppColors.kTextDisabled),
+                const SizedBox(height: AppSpacing.lg),
+                Text('No questions found',
+                    style: AppTextStyles.headingSmall),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  'No practice questions were generated for "$chapterTitle".',
+                  style: AppTextStyles.bodyMedium
+                      .copyWith(color: AppColors.kTextSecondary),
+                  textAlign: TextAlign.center,
                 ),
-              ),
-              child: Text(
-                'Go Back',
-                style: AppTextStyles.labelMedium
-                    .copyWith(color: AppColors.kTextSecondary),
-              ),
+                const SizedBox(height: AppSpacing.xl),
+                OutlinedButton(
+                  onPressed: () =>
+                      context.canPop() ? context.pop() : context.go('/home'),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.kBorder),
+                    shape: RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.circular(AppSpacing.radiusMd)),
+                  ),
+                  child: Text('Go Back',
+                      style: AppTextStyles.labelMedium
+                          .copyWith(color: AppColors.kTextSecondary)),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -1094,65 +1611,55 @@ class _EmptyView extends StatelessWidget {
 
 class _ErrorView extends StatelessWidget {
   const _ErrorView({required this.onRetry});
-
   final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.error_outline_rounded,
-              size: 52, color: AppColors.kError),
-          const SizedBox(height: AppSpacing.lg),
-          Text('Failed to load questions',
-              style: AppTextStyles.headingSmall),
-          const SizedBox(height: AppSpacing.xl),
-          FilledButton(
-            onPressed: onRetry,
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.kPrimary,
+    return Scaffold(
+      backgroundColor: AppColors.kBackground,
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline_rounded,
+                size: 52, color: AppColors.kError),
+            const SizedBox(height: AppSpacing.lg),
+            Text('Failed to load questions',
+                style: AppTextStyles.headingSmall),
+            const SizedBox(height: AppSpacing.xl),
+            FilledButton(
+              onPressed: onRetry,
+              style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.kPrimary),
+              child: Text('Retry',
+                  style:
+                      AppTextStyles.labelMedium.copyWith(color: Colors.white)),
             ),
-            child: Text(
-              'Retry',
-              style:
-                  AppTextStyles.labelMedium.copyWith(color: Colors.white),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-Color _accentForType(String type) {
-  return switch (type) {
-    'mcq' => AppColors.kPrimary,
-    'fill_blank' => AppColors.kWarning,
-    'true_false' => AppColors.kAccent,
-    _ => AppColors.kPrimary,
-  };
-}
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-Color _difficultyColor(String difficulty) {
-  return switch (difficulty) {
-    'easy' => AppColors.kDifficultyEasy,
-    'hard' => AppColors.kDifficultyHard,
-    _ => AppColors.kDifficultyMedium,
-  };
-}
+Color _accentColor(String type) => switch (type) {
+      'mcq' => AppColors.kPrimary,
+      'true_false' => AppColors.kSecondary,
+      'fill_blank' => AppColors.kWarning,
+      _ => AppColors.kAccent,
+    };
 
-String _labelForType(String type) {
-  return switch (type) {
-    'mcq' => 'MULTIPLE CHOICE',
-    'fill_blank' => 'FILL IN THE BLANK',
-    'true_false' => 'TRUE / FALSE',
-    _ => 'PRACTICE',
-  };
-}
+String _typeLabel(String type) => switch (type) {
+      'mcq' => 'Multiple Choice',
+      'true_false' => 'True / False',
+      'fill_blank' => 'Fill in Blank',
+      _ => 'Flashcard',
+    };
 
-String _titleCase(String value) {
-  if (value.isEmpty) return value;
-  return value[0].toUpperCase() + value.substring(1);
+Color _accuracyColor(double accuracy) {
+  if (accuracy >= 0.75) return AppColors.kSuccess;
+  if (accuracy >= 0.5) return AppColors.kWarning;
+  return AppColors.kError;
 }

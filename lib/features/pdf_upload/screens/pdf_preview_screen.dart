@@ -8,6 +8,7 @@ import 'package:orbitapp/core/constants/app_text_styles.dart';
 import 'package:orbitapp/models/pdf_chapter_model.dart';
 import 'package:orbitapp/models/pdf_upload_model.dart';
 import 'package:orbitapp/providers/pdf_upload_provider.dart';
+import 'package:orbitapp/providers/quiz_progress_provider.dart';
 
 class PdfPreviewScreen extends ConsumerWidget {
   final String uploadId;
@@ -506,7 +507,7 @@ class _SuccessBanner extends StatelessWidget {
   }
 }
 
-class _ChapterTile extends StatefulWidget {
+class _ChapterTile extends ConsumerStatefulWidget {
   const _ChapterTile({
     required this.chapter,
     required this.index,
@@ -517,10 +518,10 @@ class _ChapterTile extends StatefulWidget {
   final String uploadId;
 
   @override
-  State<_ChapterTile> createState() => _ChapterTileState();
+  ConsumerState<_ChapterTile> createState() => _ChapterTileState();
 }
 
-class _ChapterTileState extends State<_ChapterTile>
+class _ChapterTileState extends ConsumerState<_ChapterTile>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pressCtrl;
   late final Animation<double> _scale;
@@ -565,6 +566,22 @@ class _ChapterTileState extends State<_ChapterTile>
     ];
     final color = colors[widget.index % colors.length];
 
+    // Read chapter progress (null if never attempted)
+    final progress = ref.watch(chapterProgressProvider.select(
+      (map) => map['${widget.uploadId}:${widget.chapter.id}'],
+    ));
+    final hasProgress = progress != null;
+
+    // Determine accent color based on accuracy
+    Color progressColor = AppColors.kError;
+    if (hasProgress) {
+      if (progress.accuracyPercent >= 75) {
+        progressColor = AppColors.kSuccess;
+      } else if (progress.accuracyPercent >= 50) {
+        progressColor = AppColors.kWarning;
+      }
+    }
+
     return GestureDetector(
       onTapDown: (_) => _pressCtrl.forward(),
       onTapUp: (_) {
@@ -575,76 +592,242 @@ class _ChapterTileState extends State<_ChapterTile>
       child: ScaleTransition(
         scale: _scale,
         child: Container(
-          padding: const EdgeInsets.all(AppSpacing.lg),
           decoration: BoxDecoration(
             color: AppColors.kSurface,
             borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-            border: Border.all(color: AppColors.kBorder),
+            border: Border.all(
+              color: hasProgress
+                  ? progressColor.withValues(alpha: 0.35)
+                  : AppColors.kBorder,
+            ),
           ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Chapter number badge
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  '${widget.index + 1}',
-                  style: AppTextStyles.headingSmall.copyWith(color: color),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-
-              // Chapter info
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              // ── Main row ──────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: Row(
                   children: [
-                    Text(
-                      widget.chapter.title,
-                      style: AppTextStyles.labelLarge,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                    // Chapter number badge (checkmark when perfect)
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: hasProgress
+                            ? progressColor.withValues(alpha: 0.15)
+                            : color.withValues(alpha: 0.12),
+                        borderRadius:
+                            BorderRadius.circular(AppSpacing.radiusSm),
+                      ),
+                      alignment: Alignment.center,
+                      child: hasProgress && progress.isPerfect
+                          ? Icon(Icons.star_rounded,
+                              size: 22, color: progressColor)
+                          : hasProgress
+                              ? Text(
+                                  '${progress.accuracyPercent}%',
+                                  style: AppTextStyles.labelSmall
+                                      .copyWith(color: progressColor),
+                                )
+                              : Text(
+                                  '${widget.index + 1}',
+                                  style: AppTextStyles.headingSmall
+                                      .copyWith(color: color),
+                                ),
                     ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Icon(Icons.style_rounded,
-                            size: 12, color: AppColors.kTextSecondary),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${widget.chapter.cardCount} cards',
-                          style: AppTextStyles.caption,
-                        ),
-                      ],
+                    const SizedBox(width: AppSpacing.md),
+
+                    // Chapter info
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.chapter.title,
+                            style: AppTextStyles.labelLarge,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Icon(Icons.style_rounded,
+                                  size: 12,
+                                  color: AppColors.kTextSecondary),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${widget.chapter.cardCount} cards',
+                                style: AppTextStyles.caption,
+                              ),
+                              if (hasProgress) ...[
+                                const SizedBox(width: AppSpacing.sm),
+                                Container(
+                                  width: 3,
+                                  height: 3,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: AppColors.kTextDisabled,
+                                  ),
+                                ),
+                                const SizedBox(width: AppSpacing.sm),
+                                Text(
+                                  '${progress.correctCount}/${progress.totalCards} correct',
+                                  style: AppTextStyles.caption.copyWith(
+                                    color: progressColor,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
+
+                    const SizedBox(width: AppSpacing.sm),
+
+                    // Right side: progress ring or plain arrow
+                    hasProgress
+                        ? _MiniProgressRing(
+                            accuracy: progress.accuracy,
+                            color: progressColor,
+                            label: '${progress.accuracyPercent}%',
+                          )
+                        : Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: color.withValues(alpha: 0.1),
+                              borderRadius:
+                                  BorderRadius.circular(AppSpacing.radiusSm),
+                            ),
+                            child: Icon(Icons.arrow_forward_ios_rounded,
+                                size: 14, color: color),
+                          ),
                   ],
                 ),
               ),
 
-              const SizedBox(width: AppSpacing.sm),
-
-              // Arrow
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+              // ── Accuracy progress bar (only when attempted) ───────────────
+              if (hasProgress)
+                ClipRRect(
+                  borderRadius: const BorderRadius.only(
+                    bottomLeft: Radius.circular(AppSpacing.radiusLg),
+                    bottomRight: Radius.circular(AppSpacing.radiusLg),
+                  ),
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0, end: progress.accuracy),
+                    duration: const Duration(milliseconds: 700),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, value, _) => LinearProgressIndicator(
+                      value: value,
+                      minHeight: 4,
+                      backgroundColor:
+                          AppColors.kSurfaceVariant,
+                      valueColor:
+                          AlwaysStoppedAnimation(progressColor),
+                    ),
+                  ),
                 ),
-                child: Icon(Icons.arrow_forward_ios_rounded,
-                    size: 14, color: color),
-              ),
             ],
           ),
         ),
       ),
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Mini donut progress ring used inside a chapter tile
+// ---------------------------------------------------------------------------
+
+class _MiniProgressRing extends StatelessWidget {
+  const _MiniProgressRing({
+    required this.accuracy,
+    required this.color,
+    required this.label,
+  });
+  final double accuracy;
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 44,
+      height: 44,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0, end: accuracy),
+            duration: const Duration(milliseconds: 800),
+            curve: Curves.easeOutCubic,
+            builder: (context, value, _) => CustomPaint(
+              size: const Size(44, 44),
+              painter: _MiniRingPainter(
+                progress: value,
+                color: color,
+                trackColor: AppColors.kSurfaceVariant,
+              ),
+            ),
+          ),
+          Text(
+            label,
+            style: AppTextStyles.labelSmall.copyWith(
+              color: color,
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniRingPainter extends CustomPainter {
+  const _MiniRingPainter({
+    required this.progress,
+    required this.color,
+    required this.trackColor,
+  });
+  final double progress;
+  final Color color;
+  final Color trackColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const strokeWidth = 3.5;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.width - strokeWidth) / 2;
+    const startAngle = -1.5707963267948966; // -π/2
+
+    final trackPaint = Paint()
+      ..color = trackColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    final progressPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawCircle(center, radius, trackPaint);
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      startAngle,
+      6.283185307179586 * progress, // 2π * progress
+      false,
+      progressPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_MiniRingPainter old) =>
+      old.progress != progress || old.color != color;
 }
 
 // ---------------------------------------------------------------------------
