@@ -365,8 +365,7 @@ class _ChaptersViewState extends ConsumerState<_ChaptersView>
         onRetry: () =>
             ref.invalidate(uploadChaptersProvider(widget.uploadId)),
       ),
-      data: (rawChapters) {
-        final chapters = rawChapters.cast<PdfChapterModel>();
+      data: (chapters) {
 
         if (chapters.isEmpty) {
           return _NoChaptersView(
@@ -725,45 +724,49 @@ class _FailedView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.pagePadding),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              color: AppColors.kErrorContainer,
-              borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-            ),
-            child: const Icon(Icons.error_outline_rounded,
-                size: 34, color: AppColors.kError),
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          Text('Processing failed', style: AppTextStyles.headingSmall),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            upload.error ?? 'An error occurred while processing your PDF.',
-            style: AppTextStyles.bodyMedium
-                .copyWith(color: AppColors.kTextSecondary),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: AppSpacing.xl),
-          OutlinedButton(
-            onPressed: () => context.go('/upload'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.kPrimary,
-              side: const BorderSide(color: AppColors.kPrimary),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+      child: Center(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: AppColors.kErrorContainer,
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+                ),
+                child: const Icon(Icons.error_outline_rounded,
+                    size: 34, color: AppColors.kError),
               ),
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.xl, vertical: AppSpacing.md),
-            ),
-            child: Text('Try Again',
-                style: AppTextStyles.labelMedium
-                    .copyWith(color: AppColors.kPrimary)),
+              const SizedBox(height: AppSpacing.lg),
+              Text('Processing failed', style: AppTextStyles.headingSmall),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                upload.error ?? 'An error occurred while processing your PDF.',
+                style: AppTextStyles.bodyMedium
+                    .copyWith(color: AppColors.kTextSecondary),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AppSpacing.xl),
+              OutlinedButton(
+                onPressed: () => context.go('/upload'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.kPrimary,
+                  side: const BorderSide(color: AppColors.kPrimary),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xl, vertical: AppSpacing.md),
+                ),
+                child: Text('Try Again',
+                    style: AppTextStyles.labelMedium
+                        .copyWith(color: AppColors.kPrimary)),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

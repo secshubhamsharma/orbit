@@ -2,6 +2,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:orbitapp/core/errors/app_exception.dart';
+import 'package:orbitapp/models/flashcard_model.dart';
+import 'package:orbitapp/models/pdf_chapter_model.dart';
 import 'package:orbitapp/models/pdf_upload_model.dart';
 import 'package:orbitapp/services/api_service.dart';
 import 'package:orbitapp/services/firestore_service.dart';
@@ -175,12 +178,24 @@ class UploadNotifier extends StateNotifier<UploadState> {
       // Server is responsible for writing status='completed' and creating
       // the chapters subcollection. If it doesn't (old server version),
       // mark completed here as a fallback so the preview screen isn't stuck.
-    } on Exception catch (e) {
+    } catch (e) {
+      final rawMessage = switch (e) {
+        AppException() => e.message,
+        _ => e.toString(),
+      };
+      final message = _friendlyError(rawMessage);
+      // Keep a visible trace in debug logs so upload failures are diagnosable
+      // without attaching a debugger.
+      print(
+        '[PDF_UPLOAD] uploadId=$uploadId failed: '
+        'type=${e.runtimeType} raw="$rawMessage" mapped="$message"',
+      );
+
       try {
         await FirestoreService.instance.updateUploadStatus(
           uploadId,
           'failed',
-          error: _friendlyError(e.toString()),
+          error: message,
         );
       } catch (_) {}
     }
@@ -190,16 +205,28 @@ class UploadNotifier extends StateNotifier<UploadState> {
   void reset() => state = const UploadState();
 
   String _friendlyError(String raw) {
+    final message = raw.trim();
+    if (message.isEmpty) {
+      return 'Something went wrong. Please try again.';
+    }
+    if (raw.contains('quota') ||
+        raw.contains('Too Many Requests') ||
+        raw.contains('429')) {
+      return 'PDF generation is temporarily unavailable because the AI quota has been exceeded. Please try again later.';
+    }
     if (raw.contains('timeout')) {
       return 'The request timed out. The server may be busy — try again.';
     }
     if (raw.contains('connection') || raw.contains('SocketException')) {
       return 'No internet connection. Check your network and try again.';
     }
+    if (raw.contains('Cleartext HTTP traffic')) {
+      return 'The app could not reach the server over HTTP on this device.';
+    }
     if (raw.contains('20MB') || raw.contains('size')) {
       return 'File is too large. Please upload a PDF under 20 MB.';
     }
-    return 'Something went wrong. Please try again.';
+    return message;
   }
 }
 
@@ -220,12 +247,12 @@ final uploadStreamProvider =
 
 /// Chapters for a completed upload.
 final uploadChaptersProvider =
-    FutureProvider.family<List<dynamic>, String>((ref, uploadId) async {
+    FutureProvider.family<List<PdfChapterModel>, String>((ref, uploadId) async {
   return FirestoreService.instance.getUploadChapters(uploadId);
 });
 
 /// Cards for a specific chapter within an upload.
-final chapterCardsProvider = FutureProvider.family<List<dynamic>,
+final chapterCardsProvider = FutureProvider.family<List<FlashcardModel>,
     ({String uploadId, String chapterId})>((ref, args) async {
   final cards = await FirestoreService.instance
       .getUploadChapterCards(args.uploadId, args.chapterId);
