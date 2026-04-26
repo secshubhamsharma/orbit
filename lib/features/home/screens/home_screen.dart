@@ -367,10 +367,10 @@ class _StreakCard extends StatelessWidget {
               child: Row(
                 children: [
                   _StreakStat(
-                    icon: Icons.style_rounded,
+                    icon: Icons.quiz_rounded,
                     color: AppColors.kPrimary,
                     value: _compact(cards),
-                    label: 'Cards reviewed',
+                    label: 'Questions answered',
                   ),
                   Container(
                     width: 1,
@@ -510,14 +510,14 @@ class _DueBanner extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '$count card${count == 1 ? '' : 's'} due today',
+                          '$count question${count == 1 ? '' : 's'} due today',
                           style: AppTextStyles.bodyMedium.copyWith(
                             color: AppColors.kTextPrimary,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                         Text(
-                          'Keep your streak alive — review now',
+                          'Keep your streak alive — practice now',
                           style: AppTextStyles.caption,
                         ),
                       ],
@@ -533,7 +533,7 @@ class _DueBanner extends StatelessWidget {
                           BorderRadius.circular(AppSpacing.radiusFull),
                     ),
                     child: Text(
-                      'Review',
+                      'Practice',
                       style: AppTextStyles.labelSmall.copyWith(
                           color: const Color(0xFF1A1400),
                           fontWeight: FontWeight.w700),
@@ -559,7 +559,12 @@ class _ContinueLearning extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final mastery = topic.masteryPercent / 100;
+    // Use accuracy (0–1) for the ring and bar — it responds to every session
+    // and can reach 100 %, which is more intuitive than mastery (which is
+    // SM-2 interval-based and grows slowly).
+    final accuracy = topic.accuracy.clamp(0.0, 1.0);
+    final accPct   = (accuracy * 100).round();
+
     final (levelColor, levelLabel) = _levelInfo(topic.masteryLevel);
 
     return Padding(
@@ -569,8 +574,7 @@ class _ContinueLearning extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(
-                left: 2, bottom: AppSpacing.sm),
+            padding: const EdgeInsets.only(left: 2, bottom: AppSpacing.sm),
             child: Text('Continue learning',
                 style: AppTextStyles.headingSmall),
           ),
@@ -579,45 +583,47 @@ class _ContinueLearning extends StatelessWidget {
             child: InkWell(
               onTap: () =>
                   context.push('/home/progress/${topic.topicId}'),
-              borderRadius:
-                  BorderRadius.circular(AppSpacing.radiusMd),
+              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
               child: Ink(
                 decoration: BoxDecoration(
                   color: AppColors.kSurface,
-                  borderRadius:
-                      BorderRadius.circular(AppSpacing.radiusMd),
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                   border: Border.all(color: AppColors.kBorder),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(AppSpacing.md),
                   child: Row(
                     children: [
-                      // Mastery ring
+                      // Accuracy ring — fills to 100 % as sessions improve
                       SizedBox(
-                        width: 52,
-                        height: 52,
+                        width: 56,
+                        height: 56,
                         child: Stack(
                           alignment: Alignment.center,
                           children: [
                             TweenAnimationBuilder<double>(
-                              tween: Tween(begin: 0, end: mastery),
-                              duration:
-                                  const Duration(milliseconds: 800),
+                              tween: Tween(begin: 0, end: accuracy),
+                              duration: const Duration(milliseconds: 900),
                               curve: Curves.easeOutCubic,
                               builder: (_, v, __) => CustomPaint(
                                 painter: _MiniRingPainter(
                                     progress: v, color: levelColor),
-                                child: const SizedBox(
-                                    width: 52, height: 52),
+                                child: const SizedBox(width: 56, height: 56),
                               ),
                             ),
-                            Text(
-                              '${topic.masteryPercent.round()}%',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: levelColor,
-                              ),
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  '$accPct%',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                    color: levelColor,
+                                    height: 1,
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
@@ -638,15 +644,15 @@ class _ContinueLearning extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            const SizedBox(height: 3),
+                            const SizedBox(height: 4),
                             Row(
                               children: [
+                                // Level badge
                                 Container(
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: levelColor
-                                        .withValues(alpha: 0.1),
+                                    color: levelColor.withValues(alpha: 0.12),
                                     borderRadius: BorderRadius.circular(
                                         AppSpacing.radiusFull),
                                   ),
@@ -661,30 +667,37 @@ class _ContinueLearning extends StatelessWidget {
                                 ),
                                 const SizedBox(width: AppSpacing.sm),
                                 Text(
-                                  '${topic.totalSessions} sessions',
+                                  '${topic.totalSessions} '
+                                  '${topic.totalSessions == 1 ? 'session' : 'sessions'}',
                                   style: AppTextStyles.caption,
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 7),
+                            const SizedBox(height: 8),
+                            // Accuracy bar — fills toward 100 %
                             ClipRRect(
                               borderRadius: BorderRadius.circular(
                                   AppSpacing.radiusFull),
                               child: TweenAnimationBuilder<double>(
-                                tween: Tween(begin: 0, end: mastery),
-                                duration:
-                                    const Duration(milliseconds: 800),
-                                curve: Curves.easeOut,
+                                tween: Tween(begin: 0, end: accuracy),
+                                duration: const Duration(milliseconds: 900),
+                                curve: Curves.easeOutCubic,
                                 builder: (_, v, __) =>
                                     LinearProgressIndicator(
                                   value: v,
-                                  minHeight: 4,
-                                  backgroundColor:
-                                      AppColors.kSurfaceVariant,
+                                  minHeight: 5,
+                                  backgroundColor: AppColors.kSurfaceVariant,
                                   valueColor:
                                       AlwaysStoppedAnimation(levelColor),
                                 ),
                               ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Accuracy · improves with each session',
+                              style: AppTextStyles.caption.copyWith(
+                                  fontSize: 9.5,
+                                  color: AppColors.kTextDisabled),
                             ),
                           ],
                         ),
@@ -948,7 +961,11 @@ class _WeakRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final acc = (topic.accuracy * 100).round();
+    // Show cumulative accuracy as the bar — gives the full picture.
+    final acc    = (topic.accuracy * 100).round();
+    final sessLabel = topic.totalSessions == 1
+        ? '1 session'
+        : '${topic.totalSessions} sessions';
 
     return GestureDetector(
       onTap: () => context.push('/home/progress/${topic.topicId}'),
@@ -990,6 +1007,8 @@ class _WeakRow extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  const SizedBox(height: 2),
+                  Text(sessLabel, style: AppTextStyles.caption),
                   const SizedBox(height: 4),
                   ClipRRect(
                     borderRadius:
@@ -1012,10 +1031,17 @@ class _WeakRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: AppSpacing.md),
-            Text(
-              '$acc%',
-              style: AppTextStyles.labelMedium
-                  .copyWith(color: AppColors.kError),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  '$acc%',
+                  style: AppTextStyles.labelMedium
+                      .copyWith(color: AppColors.kError),
+                ),
+                Text('accuracy',
+                    style: AppTextStyles.caption.copyWith(fontSize: 9.5)),
+              ],
             ),
             const SizedBox(width: AppSpacing.xs),
             const Icon(Icons.chevron_right_rounded,
@@ -1039,10 +1065,10 @@ class _StatsGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = [
       (
-        Icons.style_rounded,
+        Icons.quiz_rounded,
         AppColors.kPrimary,
         _compact(user?.totalCardsReviewed ?? 0),
-        'Total cards',
+        'Total questions',
       ),
       (
         Icons.local_fire_department_rounded,

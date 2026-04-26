@@ -673,7 +673,7 @@ class _WeeklyChartState extends State<_WeeklyChart>
     return _Section(
       title: 'This week',
       trailing: total > 0
-          ? Text('$total cards', style: AppTextStyles.caption.copyWith(color: AppColors.kPrimary))
+          ? Text('$total questions', style: AppTextStyles.caption.copyWith(color: AppColors.kPrimary))
           : null,
       child: SizedBox(
         height: 140,

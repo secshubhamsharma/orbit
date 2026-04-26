@@ -400,7 +400,6 @@ class FirestoreService {
       int prevIncorrect = 0;
       int prevMinutes   = 0;
       double prevMastery = 0.0;
-      String prevMasteryLevel = 'learning';
       DateTime? firstStudied;
 
       if (progressSnap.exists && progressSnap.data() != null) {
@@ -411,7 +410,6 @@ class FirestoreService {
         prevIncorrect     = (d['totalIncorrect']     as num?)?.toInt() ?? 0;
         prevMinutes       = (d['totalStudyMinutes']  as num?)?.toInt() ?? 0;
         prevMastery       = (d['masteryPercent']     as num?)?.toDouble() ?? 0.0;
-        prevMasteryLevel  = (d['masteryLevel']       as String?) ?? 'learning';
         final fs = d['firstStudied'];
         if (fs is String) firstStudied = DateTime.tryParse(fs);
       }
@@ -459,21 +457,27 @@ class FirestoreService {
               ? 'reviewing'
               : 'learning';
 
+      // Session-level accuracy — used by the "Needs attention" query so that
+      // a single good retry immediately removes a topic from the list, rather
+      // than waiting for the cumulative average to cross the threshold.
+      final sessionAcc = cardsReviewed > 0 ? correctCount / cardsReviewed : 0.0;
+
       // ── Write topic progress ──────────────────────────────────────────────
       tx.set(progressRef, {
-        'topicId':            topicId,
-        'topicName':          topicName,
-        'domainId':           domainId,
-        'firstStudied':       firstStudied?.toIso8601String() ?? now.toIso8601String(),
-        'lastStudied':        now.toIso8601String(),
-        'totalSessions':      prevSessions + 1,
-        'totalCardsReviewed': newCards,
-        'totalCorrect':       newCorrect,
-        'totalIncorrect':     newIncorrect,
-        'accuracy':           newAccuracy,
-        'masteryPercent':     masteryPct,
-        'masteryLevel':       masteryLevel,
-        'totalStudyMinutes':  prevMinutes + (durationSeconds / 60).round(),
+        'topicId':              topicId,
+        'topicName':            topicName,
+        'domainId':             domainId,
+        'firstStudied':         firstStudied?.toIso8601String() ?? now.toIso8601String(),
+        'lastStudied':          now.toIso8601String(),
+        'totalSessions':        prevSessions + 1,
+        'totalCardsReviewed':   newCards,
+        'totalCorrect':         newCorrect,
+        'totalIncorrect':       newIncorrect,
+        'accuracy':             newAccuracy,
+        'lastSessionAccuracy':  sessionAcc,   // ← most-recent session; drives weak-topic filter
+        'masteryPercent':       masteryPct,
+        'masteryLevel':         masteryLevel,
+        'totalStudyMinutes':    prevMinutes + (durationSeconds / 60).round(),
         // Only write SRS-derived fields when schedules are available;
         // merge:true preserves previously stored values for PDF-quiz topics.
         if (updatedSchedules.isNotEmpty) 'cardsDue':      cardsDue,
@@ -642,9 +646,12 @@ class FirestoreService {
 
   Future<List<ProgressModel>> getWeakTopics(String uid,
       {int limit = 3}) async {
+    // Query by lastSessionAccuracy so a single good retry immediately removes
+    // the topic from "Needs attention". Falls back to cumulative accuracy for
+    // documents written before this field was introduced.
     final snap = await _userProgress(uid)
-        .where('accuracy', isLessThan: 0.70)
-        .orderBy('accuracy')
+        .where('lastSessionAccuracy', isLessThan: 0.70)
+        .orderBy('lastSessionAccuracy')
         .limit(limit)
         .get();
     return snap.docs.map((d) {
@@ -655,10 +662,11 @@ class FirestoreService {
   }
 
   /// Real-time stream of weak topics — auto-updates after each session.
+  /// Uses lastSessionAccuracy so an immediate good retry clears the topic.
   Stream<List<ProgressModel>> weakTopicsStream(String uid, {int limit = 3}) {
     return _userProgress(uid)
-        .where('accuracy', isLessThan: 0.70)
-        .orderBy('accuracy')
+        .where('lastSessionAccuracy', isLessThan: 0.70)
+        .orderBy('lastSessionAccuracy')
         .limit(limit)
         .snapshots()
         .map((snap) => snap.docs.map((d) {

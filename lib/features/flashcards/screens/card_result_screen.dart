@@ -89,7 +89,7 @@ class _ResultHeader extends StatelessWidget {
           'You crushed it. Keep the momentum going.');
     }
     if (acc >= 0.7) {
-      return ('🎯', 'Great work!', 'Solid session. Review missed cards soon.');
+      return ('🎯', 'Great work!', 'Solid session. Practice missed questions soon.');
     }
     if (acc >= 0.5) {
       return ('📖', 'Keep going!',
