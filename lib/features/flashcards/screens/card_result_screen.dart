@@ -16,16 +16,11 @@ class CardResultScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.read(sessionProvider(args));
 
-    final total = state.ratings.length;
-    final correct = state.correct;
-    final incorrect = state.incorrect;
-    final hard =
-        state.ratings.values.where((r) => r == 'hard').length;
-    final easy =
-        state.ratings.values.where((r) => r == 'easy').length;
-    final accuracy = state.accuracy;
-    final xp = state.xpEarned;
-
+    final total     = state.ratings.length;
+    final correct   = state.correct;   // 'good' + 'easy'
+    final incorrect = state.incorrect; // 'again'
+    final accuracy  = state.accuracy;
+    final xp        = state.xpEarned;
     final durationSec =
         DateTime.now().difference(state.startedAt).inSeconds;
 
@@ -37,37 +32,20 @@ class CardResultScreen extends ConsumerWidget {
           child: Column(
             children: [
               const SizedBox(height: AppSpacing.xl),
-
-              // Result emoji + headline
               _ResultHeader(accuracy: accuracy),
-
               const SizedBox(height: AppSpacing.xl),
-
-              // XP banner
               _XpBanner(xp: xp),
-
               const SizedBox(height: AppSpacing.lg),
-
-              // Accuracy circle
               _AccuracyCircle(accuracy: accuracy),
-
               const SizedBox(height: AppSpacing.lg),
-
-              // Rating breakdown
-              _BreakdownGrid(
+              _StatsRow(
                 total: total,
                 correct: correct,
-                hard: hard,
                 incorrect: incorrect,
-                easy: easy,
                 durationSec: durationSec,
               ),
-
               const SizedBox(height: AppSpacing.xxl),
-
-              // Action buttons
               _ActionButtons(args: args),
-
               const SizedBox(height: AppSpacing.xl),
             ],
           ),
@@ -201,23 +179,19 @@ class _AccuracyCircle extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Breakdown grid
+// Stats row (MCQ: Correct / Wrong / Questions / Time)
 // ---------------------------------------------------------------------------
 
-class _BreakdownGrid extends StatelessWidget {
+class _StatsRow extends StatelessWidget {
   final int total;
   final int correct;
-  final int hard;
   final int incorrect;
-  final int easy;
   final int durationSec;
 
-  const _BreakdownGrid({
+  const _StatsRow({
     required this.total,
     required this.correct,
-    required this.hard,
     required this.incorrect,
-    required this.easy,
     required this.durationSec,
   });
 
@@ -225,48 +199,36 @@ class _BreakdownGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final minutes = durationSec ~/ 60;
     final seconds = durationSec % 60;
-    final timeStr = minutes > 0
-        ? '${minutes}m ${seconds}s'
-        : '${seconds}s';
+    final timeStr = minutes > 0 ? '${minutes}m ${seconds}s' : '${seconds}s';
 
-    return Column(
+    return Row(
       children: [
-        Row(
-          children: [
-            _StatCell(
-                label: 'Cards',
-                value: '$total',
-                color: AppColors.kTextPrimary),
-            const SizedBox(width: AppSpacing.sm),
-            _StatCell(
-                label: 'Easy',
-                value: '$easy',
-                color: AppColors.kSuccess),
-            const SizedBox(width: AppSpacing.sm),
-            _StatCell(
-                label: 'Good',
-                value: '$correct',
-                color: AppColors.kPrimary),
-          ],
+        _StatCell(
+          label: 'Correct',
+          value: '$correct',
+          color: AppColors.kSuccess,
+          icon: Icons.check_circle_outline_rounded,
         ),
-        const SizedBox(height: AppSpacing.sm),
-        Row(
-          children: [
-            _StatCell(
-                label: 'Hard',
-                value: '$hard',
-                color: AppColors.kWarning),
-            const SizedBox(width: AppSpacing.sm),
-            _StatCell(
-                label: 'Again',
-                value: '$incorrect',
-                color: AppColors.kError),
-            const SizedBox(width: AppSpacing.sm),
-            _StatCell(
-                label: 'Time',
-                value: timeStr,
-                color: AppColors.kSecondary),
-          ],
+        const SizedBox(width: AppSpacing.sm),
+        _StatCell(
+          label: 'Wrong',
+          value: '$incorrect',
+          color: AppColors.kError,
+          icon: Icons.cancel_outlined,
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        _StatCell(
+          label: 'Questions',
+          value: '$total',
+          color: AppColors.kPrimary,
+          icon: Icons.quiz_outlined,
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        _StatCell(
+          label: 'Time',
+          value: timeStr,
+          color: AppColors.kSecondary,
+          icon: Icons.timer_outlined,
         ),
       ],
     );
@@ -277,11 +239,13 @@ class _StatCell extends StatelessWidget {
   final String label;
   final String value;
   final Color color;
+  final IconData icon;
 
   const _StatCell({
     required this.label,
     required this.value,
     required this.color,
+    required this.icon,
   });
 
   @override
@@ -289,7 +253,7 @@ class _StatCell extends StatelessWidget {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(
-            vertical: AppSpacing.md, horizontal: AppSpacing.sm),
+            vertical: AppSpacing.md, horizontal: AppSpacing.xs),
         decoration: BoxDecoration(
           color: AppColors.kSurface,
           borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
@@ -297,12 +261,17 @@ class _StatCell extends StatelessWidget {
         ),
         child: Column(
           children: [
+            Icon(icon, size: 18, color: color),
+            const SizedBox(height: 4),
             Text(
               value,
               style: AppTextStyles.headingSmall.copyWith(color: color),
             ),
             const SizedBox(height: 2),
-            Text(label, style: AppTextStyles.caption),
+            Text(label,
+                style: AppTextStyles.caption,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
           ],
         ),
       ),

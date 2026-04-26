@@ -19,24 +19,38 @@ import 'package:orbitapp/services/firestore_service.dart';
 // Local providers
 // ---------------------------------------------------------------------------
 
+// Real-time stream — updates immediately after each quiz session completes.
 final _recentSessionsProvider =
-    FutureProvider<List<ReviewSessionModel>>((ref) async {
+    StreamProvider<List<ReviewSessionModel>>((ref) {
   final user = ref.watch(currentUserProvider);
-  if (user == null) return [];
-  return FirestoreService.instance.getSessions(user.uid, limit: 10);
+  if (user == null) return Stream.value([]);
+  return FirestoreService.instance.sessionsStream(user.uid, limit: 10);
 });
 
-final _weeklyActivityProvider = FutureProvider<List<int>>((ref) async {
+// Weekly bar-chart counts. Re-fetched whenever the stream fires because
+// it is computed from the sessions collection (no cheap snapshot path).
+final _weeklyActivityProvider = StreamProvider<List<int>>((ref) async* {
   final user = ref.watch(currentUserProvider);
-  if (user == null) return List.filled(7, 0);
-  return FirestoreService.instance.getWeeklyActivity(user.uid);
+  if (user == null) {
+    yield List.filled(7, 0);
+    return;
+  }
+  // Re-derive weekly counts each time the sessions collection changes.
+  await for (final _ in FirestoreService.instance.sessionsStream(user.uid, limit: 50)) {
+    yield await FirestoreService.instance.getWeeklyActivity(user.uid);
+  }
 });
 
-final _activityCalendarProvider =
-    FutureProvider<Map<String, int>>((ref) async {
+// 35-day activity calendar — same refresh strategy as weekly chart.
+final _activityCalendarProvider = StreamProvider<Map<String, int>>((ref) async* {
   final user = ref.watch(currentUserProvider);
-  if (user == null) return {};
-  return FirestoreService.instance.getActivityCalendar(user.uid);
+  if (user == null) {
+    yield {};
+    return;
+  }
+  await for (final _ in FirestoreService.instance.sessionsStream(user.uid, limit: 50)) {
+    yield await FirestoreService.instance.getActivityCalendar(user.uid);
+  }
 });
 
 // ---------------------------------------------------------------------------

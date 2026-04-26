@@ -273,6 +273,26 @@ class FirestoreService {
     return results;
   }
 
+  /// Real-time stream of recent sessions — auto-updates after each session.
+  Stream<List<ReviewSessionModel>> sessionsStream(String uid, {int limit = 10}) {
+    return _sessions(uid)
+        .orderBy('startedAt', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map((snap) {
+      final results = <ReviewSessionModel>[];
+      for (final d in snap.docs) {
+        try {
+          final data = _clean(d.data());
+          data['sessionId'] ??= d.id;
+          data['topicId'] ??= '';
+          results.add(ReviewSessionModel.fromJson(data));
+        } catch (_) {}
+      }
+      return results;
+    });
+  }
+
   /// Returns cards-reviewed counts indexed by ISO weekday (0 = Mon … 6 = Sun)
   /// for the **current calendar week**. Matches the Mon-Sun bar chart labels.
   Future<List<int>> getWeeklyActivity(String uid, {int days = 7}) async {
@@ -366,10 +386,13 @@ class FirestoreService {
     List<CardScheduleModel> updatedSchedules = const [],
   }) async {
     final progressRef = _userProgress(uid).doc(topicId);
-    final now = DateTime.now();
+    final userRef     = _users.doc(uid);
+    final now         = DateTime.now();
 
     await _db.runTransaction((tx) async {
-      final snap = await tx.get(progressRef);
+      // Read both docs before any writes (Firestore transaction requirement)
+      final progressSnap = await tx.get(progressRef);
+      final userSnap     = await tx.get(userRef);
 
       int prevSessions  = 0;
       int prevCards     = 0;
@@ -380,8 +403,8 @@ class FirestoreService {
       String prevMasteryLevel = 'learning';
       DateTime? firstStudied;
 
-      if (snap.exists && snap.data() != null) {
-        final d = _clean(snap.data()!);
+      if (progressSnap.exists && progressSnap.data() != null) {
+        final d = _clean(progressSnap.data()!);
         prevSessions      = (d['totalSessions']      as num?)?.toInt() ?? 0;
         prevCards         = (d['totalCardsReviewed'] as num?)?.toInt() ?? 0;
         prevCorrect       = (d['totalCorrect']       as num?)?.toInt() ?? 0;
@@ -393,32 +416,35 @@ class FirestoreService {
         if (fs is String) firstStudied = DateTime.tryParse(fs);
       }
 
+      // A topic is "new" if the user has never completed a session on it before.
+      final isNewTopic = prevSessions == 0;
+
       final newCards     = prevCards + cardsReviewed;
       final newCorrect   = prevCorrect + correctCount;
       final newIncorrect = prevIncorrect + (cardsReviewed - correctCount);
       final newAccuracy  = newCards > 0 ? newCorrect / newCards : 0.0;
 
       // Mastery: cards whose SRS interval has reached ≥ 7 days.
-      // If no SM-2 schedules are provided (e.g. PDF quiz), keep the existing value.
+      // If no SM-2 schedules are provided (e.g. PDF quiz), derive from accuracy.
       double masteryPct;
       String masteryLevel;
       if (updatedSchedules.isNotEmpty) {
-        final masteredCount  = updatedSchedules.where((s) => s.interval >= 7).length;
+        final masteredCount = updatedSchedules.where((s) => s.interval >= 7).length;
         masteryPct = (masteredCount / updatedSchedules.length) * 100;
-        masteryLevel = masteryPct >= 75
-            ? 'mastered'
-            : masteryPct >= 40
-                ? 'reviewing'
-                : 'learning';
       } else {
-        // No SM-2 data: derive mastery from cumulative accuracy if first session,
-        // otherwise preserve whatever was already stored.
-        masteryPct   = prevCards == 0
-            ? (newAccuracy * 60).clamp(0, 100)  // rough bootstrap from accuracy
+        // No SM-2 data: scale cumulative accuracy to a 0–100 mastery score.
+        // Cap at 70 so a perfect PDF quiz alone cannot show "mastered".
+        masteryPct = prevCards == 0
+            ? (newAccuracy * 70).clamp(0, 70)
             : prevMastery;
-        masteryLevel = prevMasteryLevel;
       }
+      masteryLevel = masteryPct >= 75
+          ? 'mastered'
+          : masteryPct >= 40
+              ? 'reviewing'
+              : 'learning';
 
+      // ── Write topic progress ──────────────────────────────────────────────
       tx.set(progressRef, {
         'topicId':            topicId,
         'topicName':          topicName,
@@ -434,6 +460,17 @@ class FirestoreService {
         'masteryLevel':       masteryLevel,
         'totalStudyMinutes':  prevMinutes + (durationSeconds / 60).round(),
       }, SetOptions(merge: true));
+
+      // ── Increment topicsStarted on user doc for brand-new topics ─────────
+      if (isNewTopic) {
+        final userRaw = userSnap.exists && userSnap.data() != null
+            ? _clean(userSnap.data()!)
+            : <String, dynamic>{};
+        final prevTopicsStarted = (userRaw['topicsStarted'] as num?)?.toInt() ?? 0;
+        tx.set(userRef, {
+          'topicsStarted': prevTopicsStarted + 1,
+        }, SetOptions(merge: true));
+      }
     });
   }
 

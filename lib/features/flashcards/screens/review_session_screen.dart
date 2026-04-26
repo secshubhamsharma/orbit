@@ -1,6 +1,5 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -10,9 +9,12 @@ import 'package:orbitapp/core/constants/app_text_styles.dart';
 import 'package:orbitapp/models/flashcard_model.dart';
 import 'package:orbitapp/providers/session_provider.dart';
 
+// ---------------------------------------------------------------------------
+// Screen entry point
+// ---------------------------------------------------------------------------
+
 class ReviewSessionScreen extends ConsumerWidget {
   final SessionArgs args;
-
   const ReviewSessionScreen({super.key, required this.args});
 
   @override
@@ -21,7 +23,7 @@ class ReviewSessionScreen extends ConsumerWidget {
 
     // Navigate to result when session completes
     ref.listen(sessionProvider(args), (prev, next) {
-      if (!prev!.isComplete && next.isComplete) {
+      if (prev != null && !prev.isComplete && next.isComplete) {
         context.pushReplacement(
           '/review/${args.chapterId}/result',
           extra: args,
@@ -33,8 +35,8 @@ class ReviewSessionScreen extends ConsumerWidget {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
-        final shouldExit = await _confirmExit(context);
-        if (shouldExit && context.mounted) context.pop();
+        final exit = await _confirmExit(context);
+        if (exit && context.mounted) context.pop();
       },
       child: Scaffold(
         backgroundColor: AppColors.kBackground,
@@ -44,12 +46,11 @@ class ReviewSessionScreen extends ConsumerWidget {
               : state.error != null
                   ? _ErrorView(
                       message: state.error!,
-                      onRetry: () =>
-                          ref.invalidate(sessionProvider(args)),
+                      onRetry: () => ref.invalidate(sessionProvider(args)),
                     )
                   : !state.hasCards
                       ? const _EmptyView()
-                      : _SessionView(args: args, state: state),
+                      : _McqSession(args: args, state: state),
         ),
       ),
     );
@@ -63,140 +64,8 @@ class ReviewSessionScreen extends ConsumerWidget {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
             ),
-            title: Text(
-              'Quit session?',
-              style: AppTextStyles.headingSmall,
-            ),
-            content: Text(
-              'Your progress for this session will be lost.',
-              style: AppTextStyles.bodyMedium
-                  .copyWith(color: AppColors.kTextSecondary),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: Text('Keep studying',
-                    style:
-                        AppTextStyles.labelMedium.copyWith(color: AppColors.kPrimary)),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: Text('Quit',
-                    style:
-                        AppTextStyles.labelMedium.copyWith(color: AppColors.kError)),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Session view — progress bar + card + rating buttons
-// ---------------------------------------------------------------------------
-
-class _SessionView extends ConsumerWidget {
-  final SessionArgs args;
-  final SessionState state;
-
-  const _SessionView({required this.args, required this.state});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final card = state.currentCard!;
-    final progress = state.currentIndex / state.cards.length;
-
-    return Column(
-      children: [
-        // Top bar — progress + close
-        Padding(
-          padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.lg, vertical: AppSpacing.md),
-          child: Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.close_rounded,
-                    color: AppColors.kTextSecondary),
-                onPressed: () async {
-                  final shouldExit = await _showExitDialog(context);
-                  if (shouldExit && context.mounted) context.pop();
-                },
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ClipRRect(
-                      borderRadius:
-                          BorderRadius.circular(AppSpacing.radiusFull),
-                      child: LinearProgressIndicator(
-                        value: progress,
-                        backgroundColor: AppColors.kSurfaceVariant,
-                        valueColor: const AlwaysStoppedAnimation(
-                            AppColors.kPrimary),
-                        minHeight: 6,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      '${state.currentIndex} / ${state.cards.length}',
-                      style: AppTextStyles.caption,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: AppSpacing.lg),
-            ],
-          ),
-        ),
-
-        // Card area
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            child: _FlipCard(
-              card: card,
-              isFlipped: state.isFlipped,
-              onTap: () =>
-                  ref.read(sessionProvider(args).notifier).flip(),
-            ),
-          ),
-        ),
-
-        // Rating buttons (only visible after flip)
-        AnimatedCrossFade(
-          duration: const Duration(milliseconds: 250),
-          crossFadeState: state.isFlipped
-              ? CrossFadeState.showSecond
-              : CrossFadeState.showFirst,
-          firstChild: Padding(
-            padding: const EdgeInsets.all(AppSpacing.xl),
-            child: Text(
-              'Tap the card to reveal the answer',
-              style:
-                  AppTextStyles.bodySmall.copyWith(color: AppColors.kTextSecondary),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          secondChild: _RatingButtons(
-            onRate: (r) =>
-                ref.read(sessionProvider(args).notifier).rate(r),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Future<bool> _showExitDialog(BuildContext context) async {
-    return await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: AppColors.kSurface,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-            ),
-            title: Text('Quit session?', style: AppTextStyles.headingSmall),
+            title:
+                Text('Quit quiz?', style: AppTextStyles.headingSmall),
             content: Text(
               'Your progress for this session will be lost.',
               style: AppTextStyles.bodyMedium
@@ -223,373 +92,443 @@ class _SessionView extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Flip card
+// MCQ session wrapper
 // ---------------------------------------------------------------------------
 
-class _FlipCard extends StatefulWidget {
-  final FlashcardModel card;
-  final bool isFlipped;
-  final VoidCallback onTap;
-
-  const _FlipCard({
-    required this.card,
-    required this.isFlipped,
-    required this.onTap,
-  });
+class _McqSession extends StatelessWidget {
+  final SessionArgs args;
+  final SessionState state;
+  const _McqSession({required this.args, required this.state});
 
   @override
-  State<_FlipCard> createState() => _FlipCardState();
+  Widget build(BuildContext context) {
+    final card     = state.currentCard!;
+    final progress = (state.currentIndex) / state.cards.length;
+
+    return Column(
+      children: [
+        // ── Header: progress bar + counter + close ──────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md, AppSpacing.md, AppSpacing.lg, 0),
+          child: Row(
+            children: [
+              Consumer(
+                builder: (_, ref, __) => IconButton(
+                  icon: const Icon(
+                    Icons.close_rounded,
+                    color: AppColors.kTextSecondary,
+                  ),
+                  onPressed: () async {
+                    final exit = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        backgroundColor: AppColors.kSurface,
+                        shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(AppSpacing.radiusLg),
+                        ),
+                        title: Text('Quit quiz?',
+                            style: AppTextStyles.headingSmall),
+                        content: Text(
+                          'Your progress for this session will be lost.',
+                          style: AppTextStyles.bodyMedium.copyWith(
+                              color: AppColors.kTextSecondary),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: Text('Keep going',
+                                style: AppTextStyles.labelMedium
+                                    .copyWith(color: AppColors.kPrimary)),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: Text('Quit',
+                                style: AppTextStyles.labelMedium
+                                    .copyWith(color: AppColors.kError)),
+                          ),
+                        ],
+                      ),
+                    );
+                    if ((exit ?? false) && context.mounted) context.pop();
+                  },
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ClipRRect(
+                      borderRadius:
+                          BorderRadius.circular(AppSpacing.radiusFull),
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 6,
+                        backgroundColor: AppColors.kSurfaceVariant,
+                        valueColor: const AlwaysStoppedAnimation(
+                            AppColors.kPrimary),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${state.currentIndex + 1} / ${state.cards.length}',
+                      style: AppTextStyles.caption,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+            ],
+          ),
+        ),
+
+        // ── MCQ card (keyed so state resets on each new card) ───────────────
+        Expanded(
+          child: _McqCard(
+            key: ValueKey(card.id),
+            card: card,
+            args: args,
+          ),
+        ),
+      ],
+    );
+  }
 }
 
-class _FlipCardState extends State<_FlipCard>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
+// ---------------------------------------------------------------------------
+// Individual MCQ card
+// ---------------------------------------------------------------------------
+
+enum _OptionState { idle, correct, wrong, dimmed }
+
+class _McqCard extends ConsumerStatefulWidget {
+  final FlashcardModel card;
+  final SessionArgs args;
+  const _McqCard({super.key, required this.card, required this.args});
+
+  @override
+  ConsumerState<_McqCard> createState() => _McqCardState();
+}
+
+class _McqCardState extends ConsumerState<_McqCard>
+    with TickerProviderStateMixin {
+  int? _chosenIndex;
+  bool _isAnswered = false;
+
+  late final AnimationController _cardCtrl;
+  late final Animation<Offset>   _cardSlide;
+  late final Animation<double>   _cardFade;
+  late final AnimationController _optCtrl;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 380),
-    );
-    _animation = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
-  }
 
-  @override
-  void didUpdateWidget(covariant _FlipCard old) {
-    super.didUpdateWidget(old);
+    _cardCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 260));
+    _cardSlide =
+        Tween<Offset>(begin: const Offset(0.04, 0), end: Offset.zero).animate(
+            CurvedAnimation(parent: _cardCtrl, curve: Curves.easeOutCubic));
+    _cardFade = CurvedAnimation(parent: _cardCtrl, curve: Curves.easeOut);
+    _cardCtrl.forward();
 
-    if (widget.isFlipped != old.isFlipped) {
-      if (widget.isFlipped) {
-        _controller.forward();
-      } else {
-        _controller.reverse();
-      }
-    }
-
-    // New card — reset without animation
-    if (widget.card.id != old.card.id) {
-      _controller.value = 0;
-    }
+    _optCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 500));
+    _optCtrl.forward();
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _cardCtrl.dispose();
+    _optCtrl.dispose();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: widget.onTap,
-      child: AnimatedBuilder(
-        animation: _animation,
-        builder: (context, child) {
-          final angle = _animation.value * math.pi;
-          final isFront = angle < math.pi / 2;
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
-          return Transform(
-            alignment: Alignment.center,
-            transform: Matrix4.identity()
-              ..setEntry(3, 2, 0.001)
-              ..rotateY(angle),
-            child: isFront
-                ? _CardFace(card: widget.card, isFront: true)
-                : Transform(
-                    alignment: Alignment.center,
-                    transform: Matrix4.identity()..rotateY(math.pi),
-                    child:
-                        _CardFace(card: widget.card, isFront: false),
-                  ),
-          );
-        },
-      ),
-    );
+  List<String> get _options {
+    final opts = widget.card.options;
+    return opts.isNotEmpty
+        ? opts
+        : ['True', 'False', 'Cannot be determined', 'None of the above'];
   }
-}
 
-class _CardFace extends StatelessWidget {
-  final FlashcardModel card;
-  final bool isFront;
+  int get _correctIndex => widget.card.correctOption ?? 0;
 
-  const _CardFace({required this.card, required this.isFront});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: isFront ? AppColors.kSurface : AppColors.kPrimaryContainer,
-        borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
-        border: Border.all(
-          color: isFront
-              ? AppColors.kBorder
-              : AppColors.kPrimary.withValues(alpha: 0.3),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(AppSpacing.xl),
-      child: isFront ? _FrontContent(card: card) : _BackContent(card: card),
-    );
+  _OptionState _stateFor(int i) {
+    if (!_isAnswered) return _OptionState.idle;
+    if (i == _correctIndex) return _OptionState.correct;
+    if (i == _chosenIndex) return _OptionState.wrong;
+    return _OptionState.dimmed;
   }
-}
 
-class _FrontContent extends StatelessWidget {
-  final FlashcardModel card;
+  // ── Interaction ────────────────────────────────────────────────────────────
 
-  const _FrontContent({required this.card});
+  Future<void> _onTap(int index) async {
+    if (_isAnswered) return;
+    final isCorrect = index == _correctIndex;
+
+    HapticFeedback.lightImpact();
+    if (!isCorrect) HapticFeedback.heavyImpact();
+
+    setState(() {
+      _chosenIndex  = index;
+      _isAnswered   = true;
+    });
+
+    // Show feedback for 700 ms, then advance
+    await Future.delayed(const Duration(milliseconds: 700));
+    if (!mounted) return;
+
+    ref.read(sessionProvider(widget.args).notifier).rate(
+          isCorrect ? 'good' : 'again',
+        );
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        // Card type badge
-        Container(
-          padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
-          decoration: BoxDecoration(
-            color: AppColors.kSurfaceVariant,
-            borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
-          ),
-          child: Text(
-            _typeLabel(card.type),
-            style: AppTextStyles.labelSmall,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.xl),
+    final opts = _options;
 
-        // Question
-        Text(
-          card.front,
-          style: AppTextStyles.cardFront,
-          textAlign: TextAlign.center,
-        ),
-
-        // MCQ options on the front
-        if (card.type == 'mcq' && card.options.isNotEmpty) ...[
-          const SizedBox(height: AppSpacing.xl),
-          ...card.options.asMap().entries.map((e) {
-            final letter = String.fromCharCode(65 + e.key); // A, B, C, D
-            return Padding(
-              padding:
-                  const EdgeInsets.only(bottom: AppSpacing.sm),
-              child: Row(
-                children: [
-                  Container(
-                    width: 28,
-                    height: 28,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: AppColors.kSurfaceVariant,
-                      borderRadius:
-                          BorderRadius.circular(AppSpacing.radiusSm),
+    return FadeTransition(
+      opacity: _cardFade,
+      child: SlideTransition(
+        position: _cardSlide,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.xl),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Question card ─────────────────────────────────────────────
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                decoration: BoxDecoration(
+                  color: AppColors.kSurface,
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+                  border: Border.all(color: AppColors.kBorder),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.18),
+                      blurRadius: 20,
+                      offset: const Offset(0, 6),
                     ),
-                    child: Text(letter,
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // MCQ badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.sm, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.kPrimary.withValues(alpha: 0.12),
+                        borderRadius:
+                            BorderRadius.circular(AppSpacing.radiusFull),
+                      ),
+                      child: Text(
+                        'Multiple Choice',
                         style: AppTextStyles.labelSmall
-                            .copyWith(color: AppColors.kTextPrimary)),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: Text(e.value,
-                        style: AppTextStyles.bodyMedium),
-                  ),
-                ],
+                            .copyWith(color: AppColors.kPrimary),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    Text(
+                      widget.card.front,
+                      style: AppTextStyles.headingSmall.copyWith(
+                        color: AppColors.kTextPrimary,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            );
-          }),
-        ],
 
-        const SizedBox(height: AppSpacing.xl),
-        Text(
-          'Tap to reveal',
-          style: AppTextStyles.caption
-              .copyWith(color: AppColors.kTextDisabled),
-        ),
-      ],
-    );
-  }
+              const SizedBox(height: AppSpacing.lg),
 
-  String _typeLabel(String type) {
-    return switch (type) {
-      'mcq' => 'Multiple Choice',
-      'fill_blank' => 'Fill in the Blank',
-      'true_false' => 'True / False',
-      _ => 'Flashcard',
-    };
-  }
-}
+              // ── Options ────────────────────────────────────────────────────
+              ...opts.asMap().entries.map((entry) {
+                final i     = entry.key;
+                final label = entry.value;
+                final st    = _stateFor(i);
+                final delay = i * 0.12;
 
-class _BackContent extends StatelessWidget {
-  final FlashcardModel card;
+                return AnimatedBuilder(
+                  animation: _optCtrl,
+                  builder: (_, __) {
+                    final t = (((_optCtrl.value - delay) / (1 - delay))
+                            .clamp(0.0, 1.0));
+                    final curve = Curves.easeOutCubic.transform(t);
+                    return Opacity(
+                      opacity: curve,
+                      child: Transform.translate(
+                        offset: Offset(0, 18 * (1 - curve)),
+                        child: Padding(
+                          padding:
+                              const EdgeInsets.only(bottom: AppSpacing.sm),
+                          child: _OptionTile(
+                            letter: String.fromCharCode(65 + i),
+                            label:  label,
+                            state:  st,
+                            onTap:  () => _onTap(i),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              }),
 
-  const _BackContent({required this.card});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        // Answer label
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.check_circle_rounded,
-                color: AppColors.kSuccess, size: 18),
-            const SizedBox(width: AppSpacing.xs),
-            Text('Answer',
-                style: AppTextStyles.labelSmall
-                    .copyWith(color: AppColors.kSuccess)),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.lg),
-
-        // Answer text
-        Text(
-          card.back,
-          style: AppTextStyles.cardBack,
-          textAlign: TextAlign.center,
-        ),
-
-        // Explanation (optional)
-        if (card.explanation != null &&
-            card.explanation!.isNotEmpty) ...[
-          const SizedBox(height: AppSpacing.xl),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(AppSpacing.md),
-            decoration: BoxDecoration(
-              color: AppColors.kSurfaceHigh,
-              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Explanation',
-                    style: AppTextStyles.labelSmall
-                        .copyWith(color: AppColors.kTextSecondary)),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  card.explanation!,
-                  style: AppTextStyles.bodySmall
-                      .copyWith(color: AppColors.kTextPrimary),
+              // ── Explanation after answering ────────────────────────────────
+              if (_isAnswered &&
+                  widget.card.explanation != null &&
+                  widget.card.explanation!.isNotEmpty) ...[
+                const SizedBox(height: AppSpacing.md),
+                AnimatedOpacity(
+                  opacity: _isAnswered ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 300),
+                  child: Container(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    decoration: BoxDecoration(
+                      color: AppColors.kSurface,
+                      borderRadius:
+                          BorderRadius.circular(AppSpacing.radiusMd),
+                      border: Border.all(
+                          color: AppColors.kBorder.withValues(alpha: 0.5)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Explanation',
+                          style: AppTextStyles.labelSmall
+                              .copyWith(color: AppColors.kTextSecondary),
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          widget.card.explanation!,
+                          style: AppTextStyles.bodySmall
+                              .copyWith(color: AppColors.kTextPrimary),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ],
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Rating buttons
-// ---------------------------------------------------------------------------
-
-class _RatingButtons extends StatelessWidget {
-  final void Function(String rating) onRate;
-
-  const _RatingButtons({required this.onRate});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-          AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xl),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'How well did you know this?',
-            style: AppTextStyles.caption,
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Row(
-            children: [
-              _RatingBtn(
-                label: 'Again',
-                sublabel: '<1d',
-                color: AppColors.kError,
-                onTap: () => onRate('again'),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              _RatingBtn(
-                label: 'Hard',
-                sublabel: '<1d',
-                color: AppColors.kWarning,
-                onTap: () => onRate('hard'),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              _RatingBtn(
-                label: 'Good',
-                sublabel: '1d',
-                color: AppColors.kPrimary,
-                onTap: () => onRate('good'),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              _RatingBtn(
-                label: 'Easy',
-                sublabel: '4d',
-                color: AppColors.kSuccess,
-                onTap: () => onRate('easy'),
-              ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
 }
 
-class _RatingBtn extends StatelessWidget {
+// ---------------------------------------------------------------------------
+// Option tile
+// ---------------------------------------------------------------------------
+
+class _OptionTile extends StatelessWidget {
+  final String letter;
   final String label;
-  final String sublabel;
-  final Color color;
+  final _OptionState state;
   final VoidCallback onTap;
 
-  const _RatingBtn({
+  const _OptionTile({
+    required this.letter,
     required this.label,
-    required this.sublabel,
-    required this.color,
+    required this.state,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            border: Border.all(color: color.withValues(alpha: 0.3)),
-          ),
-          child: Column(
-            children: [
-              Text(
-                label,
-                style: AppTextStyles.labelMedium.copyWith(color: color),
-              ),
-              Text(
-                sublabel,
-                style: AppTextStyles.caption
-                    .copyWith(color: color.withValues(alpha: 0.7)),
-              ),
-            ],
+    final Color bg, border, letterBg, letterFg, textColor;
+
+    switch (state) {
+      case _OptionState.correct:
+        bg       = AppColors.kSuccess.withValues(alpha: 0.10);
+        border   = AppColors.kSuccess.withValues(alpha: 0.6);
+        letterBg = AppColors.kSuccess;
+        letterFg = Colors.white;
+        textColor = AppColors.kSuccess;
+      case _OptionState.wrong:
+        bg       = AppColors.kError.withValues(alpha: 0.10);
+        border   = AppColors.kError.withValues(alpha: 0.6);
+        letterBg = AppColors.kError;
+        letterFg = Colors.white;
+        textColor = AppColors.kError;
+      case _OptionState.dimmed:
+        bg       = AppColors.kBackground;
+        border   = AppColors.kBorder.withValues(alpha: 0.4);
+        letterBg = AppColors.kSurfaceVariant;
+        letterFg = AppColors.kTextDisabled;
+        textColor = AppColors.kTextDisabled;
+      case _OptionState.idle:
+        bg       = AppColors.kSurface;
+        border   = AppColors.kBorder;
+        letterBg = AppColors.kSurfaceVariant;
+        letterFg = AppColors.kTextPrimary;
+        textColor = AppColors.kTextPrimary;
+    }
+
+    final icon = state == _OptionState.correct
+        ? Icons.check_rounded
+        : state == _OptionState.wrong
+            ? Icons.close_rounded
+            : null;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: border, width: 1.5),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: state == _OptionState.idle ? onTap : null,
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md, vertical: AppSpacing.md),
+            child: Row(
+              children: [
+                // Letter badge
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: letterBg,
+                    borderRadius:
+                        BorderRadius.circular(AppSpacing.radiusSm),
+                  ),
+                  alignment: Alignment.center,
+                  child: icon != null
+                      ? Icon(icon, size: 16, color: letterFg)
+                      : Text(
+                          letter,
+                          style: AppTextStyles.labelMedium
+                              .copyWith(color: letterFg),
+                        ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 220),
+                    style: AppTextStyles.bodyMedium
+                        .copyWith(color: textColor),
+                    child: Text(label),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -603,19 +542,15 @@ class _RatingBtn extends StatelessWidget {
 
 class _LoadingView extends StatelessWidget {
   const _LoadingView();
-
   @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: CircularProgressIndicator(color: AppColors.kPrimary),
-    );
-  }
+  Widget build(BuildContext context) => const Center(
+        child: CircularProgressIndicator(color: AppColors.kPrimary),
+      );
 }
 
 class _ErrorView extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
-
   const _ErrorView({required this.message, required this.onRetry});
 
   @override
@@ -628,9 +563,8 @@ class _ErrorView extends StatelessWidget {
           const Icon(Icons.error_outline_rounded,
               color: AppColors.kError, size: 56),
           const SizedBox(height: AppSpacing.lg),
-          Text('Failed to load cards',
-              style: AppTextStyles.headingSmall,
-              textAlign: TextAlign.center),
+          Text('Failed to load questions',
+              style: AppTextStyles.headingSmall, textAlign: TextAlign.center),
           const SizedBox(height: AppSpacing.sm),
           Text(message,
               style: AppTextStyles.caption, textAlign: TextAlign.center),
@@ -658,10 +592,10 @@ class _EmptyView extends StatelessWidget {
         children: [
           const Text('📭', style: TextStyle(fontSize: 56)),
           const SizedBox(height: AppSpacing.lg),
-          Text('No cards in this chapter',
+          Text('No questions in this chapter',
               style: AppTextStyles.headingSmall),
           const SizedBox(height: AppSpacing.sm),
-          Text('Generate cards first from the chapter screen',
+          Text('Generate questions first from the chapter screen',
               style: AppTextStyles.caption, textAlign: TextAlign.center),
           const SizedBox(height: AppSpacing.xl),
           TextButton(
