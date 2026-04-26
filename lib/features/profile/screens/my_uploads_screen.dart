@@ -92,111 +92,115 @@ class _UploadCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final (color, label) = _statusInfo(upload.status);
 
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.kSurface,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => context.push('/upload/preview/${upload.id}'),
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-        border: Border.all(color: AppColors.kBorder),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // PDF icon
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: AppColors.kSurfaceVariant,
-              borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-            ),
-            child: const Icon(Icons.picture_as_pdf_outlined,
-                size: 22, color: AppColors.kError),
+        child: Ink(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            color: AppColors.kSurface,
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+            border: Border.all(color: AppColors.kBorder),
           ),
-
-          const SizedBox(width: AppSpacing.md),
-
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Title
-                Text(
-                  upload.topicName.isNotEmpty
-                      ? upload.topicName
-                      : upload.fileName,
-                  style: AppTextStyles.bodyMedium.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.kTextPrimary,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppColors.kSurfaceVariant,
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
                 ),
-
-                if (upload.topicName.isNotEmpty) ...[
-                  const SizedBox(height: 1),
-                  Text(
-                    upload.fileName,
-                    style: AppTextStyles.caption,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-
-                const SizedBox(height: AppSpacing.sm),
-
-                // Meta row
-                Row(
+                child: const Icon(Icons.picture_as_pdf_outlined,
+                    size: 22, color: AppColors.kError),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (upload.pageCount > 0) ...[
-                      Text('${upload.pageCount} pages',
-                          style: AppTextStyles.caption),
-                      _dot(),
-                    ],
-                    if (upload.fileSizeMB > 0) ...[
+                    Text(
+                      upload.topicName.isNotEmpty
+                          ? upload.topicName
+                          : upload.fileName,
+                      style: AppTextStyles.bodyMedium.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.kTextPrimary,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (upload.topicName.isNotEmpty) ...[
+                      const SizedBox(height: 1),
                       Text(
-                          '${upload.fileSizeMB.toStringAsFixed(1)} MB',
-                          style: AppTextStyles.caption),
-                      _dot(),
+                        upload.fileName,
+                        style: AppTextStyles.caption,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
-                    Text(_timeAgo(upload.uploadedAt),
-                        style: AppTextStyles.caption),
-                  ],
-                ),
-
-                const SizedBox(height: AppSpacing.sm),
-
-                // Status + cards
-                Row(
-                  children: [
-                    _StatusBadge(color: color, label: label,
-                        spinning: upload.isProcessing),
-                    if (upload.isCompleted &&
-                        upload.generatedCardCount > 0) ...[
-                      const SizedBox(width: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.sm),
+                    Row(
+                      children: [
+                        if (upload.pageCount > 0) ...[
+                          Text('${upload.pageCount} pages',
+                              style: AppTextStyles.caption),
+                          _dot(),
+                        ],
+                        if (upload.fileSizeMB > 0) ...[
+                          Text(
+                              '${upload.fileSizeMB.toStringAsFixed(1)} MB',
+                              style: AppTextStyles.caption),
+                          _dot(),
+                        ],
+                        Text(_timeAgo(upload.uploadedAt),
+                            style: AppTextStyles.caption),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Row(
+                      children: [
+                        _StatusBadge(
+                          color: color,
+                          label: label,
+                          spinning: upload.isProcessing,
+                        ),
+                        if (upload.isCompleted &&
+                            upload.generatedCardCount > 0) ...[
+                          const SizedBox(width: AppSpacing.sm),
+                          Text(
+                            '${upload.generatedCardCount} cards generated',
+                            style: AppTextStyles.caption
+                                .copyWith(color: AppColors.kSuccess),
+                          ),
+                        ],
+                      ],
+                    ),
+                    if (upload.isFailed && upload.error != null) ...[
+                      const SizedBox(height: AppSpacing.xs),
                       Text(
-                        '${upload.generatedCardCount} cards generated',
+                        upload.error!,
                         style: AppTextStyles.caption
-                            .copyWith(color: AppColors.kSuccess),
+                            .copyWith(color: AppColors.kError),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ],
                 ),
-
-                if (upload.isFailed && upload.error != null) ...[
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    upload.error!,
-                    style: AppTextStyles.caption
-                        .copyWith(color: AppColors.kError),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ],
-            ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: AppColors.kTextDisabled,
+                size: 20,
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

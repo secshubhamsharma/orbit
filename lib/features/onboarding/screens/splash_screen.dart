@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../main.dart' show orbitFirebaseFuture;
+import '../../../services/permission_service.dart';
 
 // ─── Splash Screen ────────────────────────────────────────────────────────────
 
@@ -137,6 +138,10 @@ class _SplashScreenState extends State<SplashScreen>
     final prefs           = results[1] as SharedPreferences;
     final onboardingDone  = prefs.getBool('onboarding_done') ?? false;
     final user            = FirebaseAuth.instance.currentUser;
+
+    await PermissionService.requestInitialPermissions(prefs);
+
+    if (!mounted) return;
 
     if (user != null) {
       try {
