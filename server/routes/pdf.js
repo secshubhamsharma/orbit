@@ -1,13 +1,12 @@
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
 const fs = require('fs');
 const pdfParse = require('pdf-parse');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Groq = require('groq-sdk');
 const { getFirestore } = require('../utils/firebase');
 
 const router = express.Router();
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // ─── Temp upload directory ─────────────────────────────────────────────────────
 const UPLOAD_DIR = '/tmp/orbit-uploads';
@@ -27,9 +26,9 @@ const upload = multer({
 });
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
-const MAX_TEXT_CHARS = 40000;   // ~10,000 tokens — safe for Gemini 1.5 Flash
-const MAX_CHAPTERS   = 8;
-const MIN_CHAPTERS   = 2;
+const MAX_TEXT_CHARS        = 40000;
+const MAX_CHAPTERS          = 8;
+const MIN_CHAPTERS          = 2;
 const CARDS_PER_CHAPTER_MIN = 5;
 const CARDS_PER_CHAPTER_MAX = 12;
 
@@ -38,7 +37,7 @@ router.post('/process', upload.single('pdf'), async (req, res) => {
   const { uploadId, topicName, domainId } = req.body;
   const filePath = req.file?.path;
 
-  // ── Validation ────────────────────────────────────────────────────────────
+  // ── Validation ─────────────────────────────────────────────────────────────
   if (!uploadId || !topicName || !domainId) {
     cleanupFile(filePath);
     return res.status(400).json({
@@ -47,52 +46,71 @@ router.post('/process', upload.single('pdf'), async (req, res) => {
     });
   }
   if (!req.file) {
-    return res.status(400).json({ success: false, message: 'PDF file is required.' });
+    return res
+      .status(400)
+      .json({ success: false, message: 'PDF file is required.' });
   }
 
   const db = getFirestore();
   const uploadRef = db.collection('uploads').doc(uploadId);
 
   try {
-    // ── 1. Mark as processing ─────────────────────────────────────────────
+    // ── 1. Mark as processing ────────────────────────────────────────────────
     await uploadRef.update({ status: 'processing' });
 
-    // ── 2. Extract text from PDF ──────────────────────────────────────────
+    // ── 2. Extract text from PDF ─────────────────────────────────────────────
     const buffer = fs.readFileSync(filePath);
     const parsed = await pdfParse(buffer);
     const pageCount = parsed.numpages;
     const rawText = parsed.text?.trim() || '';
 
     if (rawText.length < 100) {
-      await markFailed(uploadRef, 'Could not extract readable text from this PDF. Make sure it is not a scanned image-only PDF.');
+      await markFailed(
+        uploadRef,
+        'Could not extract readable text from this PDF. Make sure it is not a scanned image-only PDF.',
+      );
       return res.status(422).json({
         success: false,
         message: 'Could not extract readable text from the PDF.',
       });
     }
 
-    // Truncate but keep as much text as possible
     const text = rawText.slice(0, MAX_TEXT_CHARS);
 
-    // ── 3. Generate chapter-wise flashcards with Gemini ───────────────────
+    // ── 3. Generate chapter-wise MCQ with Groq ───────────────────────────────
     let chapters;
     try {
       chapters = await generateChapters(topicName, text);
-    } catch (geminiErr) {
-      console.error('[PDF] Gemini failed:', geminiErr.message);
-      await markFailed(uploadRef, 'AI failed to process this PDF. Please try again.');
-      return res.status(500).json({ success: false, message: 'AI generation failed. Please try again.' });
+    } catch (aiErr) {
+      const details = aiErr.message || 'Unknown AI error';
+      console.error('[PDF] Groq failed:', details);
+      await markFailed(uploadRef, `AI generation failed: ${details}`);
+      return res.status(500).json({
+        success: false,
+        message: `AI generation failed: ${details}`,
+        details,
+      });
     }
 
     if (!chapters || chapters.length === 0) {
-      await markFailed(uploadRef, 'AI could not identify any study content in this PDF.');
-      return res.status(422).json({ success: false, message: 'No study content found in PDF.' });
+      await markFailed(
+        uploadRef,
+        'AI could not identify any study content in this PDF.',
+      );
+      return res
+        .status(422)
+        .json({ success: false, message: 'No study content found in PDF.' });
     }
 
-    // ── 4. Write chapters + cards to Firestore ────────────────────────────
-    const { totalCards } = await writeChaptersToFirestore(db, uploadRef, uploadId, chapters);
+    // ── 4. Write chapters + cards to Firestore ───────────────────────────────
+    const { totalCards } = await writeChaptersToFirestore(
+      db,
+      uploadRef,
+      uploadId,
+      chapters,
+    );
 
-    // ── 5. Mark completed ─────────────────────────────────────────────────
+    // ── 5. Mark completed ────────────────────────────────────────────────────
     await uploadRef.update({
       status: 'completed',
       pageCount,
@@ -100,28 +118,38 @@ router.post('/process', upload.single('pdf'), async (req, res) => {
       completedAt: new Date().toISOString(),
     });
 
-    console.log(`[PDF] ${uploadId}: ${chapters.length} chapters, ${totalCards} cards`);
-    res.json({ success: true, cardCount: totalCards, pageCount, chapterCount: chapters.length });
-
+    console.log(
+      `[PDF] ${uploadId}: ${chapters.length} chapters, ${totalCards} MCQ cards`,
+    );
+    res.json({
+      success: true,
+      cardCount: totalCards,
+      pageCount,
+      chapterCount: chapters.length,
+    });
   } catch (err) {
     console.error('[PDF] Unexpected error:', err.message);
-    await markFailed(uploadRef, err.message || 'Processing failed').catch(() => {});
-    res.status(500).json({ success: false, message: 'PDF processing failed. Please try again.' });
+    await markFailed(uploadRef, err.message || 'Processing failed').catch(
+      () => {},
+    );
+    res
+      .status(500)
+      .json({ success: false, message: 'PDF processing failed. Please try again.' });
   } finally {
     cleanupFile(filePath);
   }
 });
 
-// ─── Gemini: detect chapters and generate flashcards ──────────────────────────
+// ─── Groq: detect chapters and generate MCQ ───────────────────────────────────
 async function generateChapters(topicName, text) {
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
   const prompt = `
 You are an expert educator. A student uploaded a PDF titled "${topicName}".
 
-Analyze the text below and:
-1. Identify ${MIN_CHAPTERS}–${MAX_CHAPTERS} logical chapters or sections based on the content structure.
-2. For each chapter generate ${CARDS_PER_CHAPTER_MIN}–${CARDS_PER_CHAPTER_MAX} high-quality flashcards.
+Analyze the text and:
+1. Identify ${MIN_CHAPTERS}–${MAX_CHAPTERS} logical chapters or sections based on the content.
+2. For each chapter generate ${CARDS_PER_CHAPTER_MIN}–${CARDS_PER_CHAPTER_MAX} multiple-choice questions.
+
+Every question MUST have exactly 4 options and one correct answer.
 
 Return ONLY a valid JSON object — no markdown, no code fences, no explanation:
 {
@@ -131,12 +159,11 @@ Return ONLY a valid JSON object — no markdown, no code fences, no explanation:
       "order": 0,
       "cards": [
         {
-          "type": "flashcard",
-          "front": "Question or term",
-          "back": "Answer or definition",
-          "options": [],
-          "correctOption": null,
-          "explanation": "Optional explanation shown after answer",
+          "front": "The question text",
+          "back": "The correct answer text (must match the correct option exactly)",
+          "options": ["Option A", "Option B", "Option C", "Option D"],
+          "correctOption": 0,
+          "explanation": "Brief explanation of why this answer is correct",
           "difficulty": "easy"
         }
       ]
@@ -144,22 +171,15 @@ Return ONLY a valid JSON object — no markdown, no code fences, no explanation:
   ]
 }
 
-Card type rules:
-- "flashcard" — classic Q&A or term/definition (use for 50% of cards)
-- "mcq" — multiple choice; options = 4 strings, correctOption = 0-indexed int (30% of cards)
-- "fill_blank" — sentence with ___ to fill in (10% of cards)
-- "true_false" — back must be "True" or "False" (10% of cards)
-
-Difficulty rules:
-- easy: recall of basic facts
-- medium: application or comparison
-- hard: analysis or multi-step reasoning
-
-Quality rules:
-- Each question must be clear and standalone
-- MCQ distractors must be plausible but clearly wrong
+Rules:
+- "correctOption" is 0-indexed (0 = first option, 1 = second, etc.)
+- Difficulty: mix of "easy", "medium", and "hard" across each chapter
+- Each question must be clear and standalone — no ambiguous wording
+- All 4 options must be plausible; wrong options must be clearly incorrect on reflection
 - No duplicate questions across chapters
-- Content must match the chapter title
+- "back" must be the exact text of the correct option
+- Each chapter's questions must be about that chapter's content
+- Content must be based on the PDF text provided
 
 PDF TEXT:
 ${text}
@@ -167,13 +187,18 @@ ${text}
 
   let responseText;
   try {
-    const result = await model.generateContent(prompt);
-    responseText = result.response.text().trim();
+    const completion = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.4,
+      max_tokens: 8192,
+    });
+    responseText = completion.choices[0].message.content.trim();
   } catch (err) {
-    throw new Error(`Gemini API error: ${err.message}`);
+    throw new Error(`Groq API error: ${err.message}`);
   }
 
-  // Strip markdown fences if Gemini adds them despite instructions
+  // Strip markdown fences if model adds them despite instructions
   const cleaned = responseText
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```\s*$/, '')
@@ -183,63 +208,62 @@ ${text}
   try {
     parsed = JSON.parse(cleaned);
   } catch (_) {
-    // Try to extract JSON object from the response (sometimes Gemini adds preamble)
+    // Try to salvage a JSON object buried in extra text
     const match = cleaned.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('Gemini returned non-JSON response');
+    if (!match) throw new Error('AI returned non-JSON response');
     parsed = JSON.parse(match[0]);
   }
 
   if (!parsed.chapters || !Array.isArray(parsed.chapters)) {
-    throw new Error('Gemini response missing chapters array');
+    throw new Error('AI response missing chapters array');
   }
 
-  // Sanitize and validate
   return parsed.chapters
-    .filter(ch => ch.title && Array.isArray(ch.cards) && ch.cards.length > 0)
+    .filter(
+      (ch) => ch.title && Array.isArray(ch.cards) && ch.cards.length > 0,
+    )
     .slice(0, MAX_CHAPTERS)
     .map((ch, i) => ({
       title: String(ch.title).trim(),
       order: i,
-      cards: sanitizeCards(ch.cards, `${i}`),
+      cards: sanitizeCards(ch.cards),
     }));
 }
 
 // ─── Sanitize individual card objects ─────────────────────────────────────────
-function sanitizeCards(rawCards, chapterId) {
-  const validTypes = ['flashcard', 'mcq', 'fill_blank', 'true_false'];
-  const validDiffs  = ['easy', 'medium', 'hard'];
+function sanitizeCards(rawCards) {
+  const validDiffs = ['easy', 'medium', 'hard'];
 
   return rawCards
-    .filter(c => c.front && c.back)
+    .filter(
+      (c) => c.front && Array.isArray(c.options) && c.options.length >= 2,
+    )
     .slice(0, CARDS_PER_CHAPTER_MAX)
-    .map((c, index) => ({
-      type: validTypes.includes(c.type) ? c.type : 'flashcard',
-      front: String(c.front).trim(),
-      back: String(c.back).trim(),
-      options: c.type === 'mcq' && Array.isArray(c.options)
-        ? c.options.map(String).slice(0, 4)
-        : [],
-      correctOption: c.type === 'mcq' && typeof c.correctOption === 'number'
-        ? c.correctOption
-        : null,
-      explanation: c.explanation ? String(c.explanation).trim() : null,
-      difficulty: validDiffs.includes(c.difficulty) ? c.difficulty : 'medium',
-      tags: [],
-      order: index,
-      generatedByAI: true,
-      topicId: chapterId,
-    }));
+    .map((c, index) => {
+      const correctOption =
+        typeof c.correctOption === 'number' ? c.correctOption : 0;
+      const options = c.options.map(String).slice(0, 4);
+      return {
+        type: 'mcq',
+        front: String(c.front).trim(),
+        back: String(c.back ?? options[correctOption] ?? '').trim(),
+        options,
+        correctOption,
+        explanation: c.explanation ? String(c.explanation).trim() : null,
+        difficulty: validDiffs.includes(c.difficulty) ? c.difficulty : 'medium',
+        tags: [],
+        order: index,
+        generatedByAI: true,
+      };
+    });
 }
 
 // ─── Write chapters + cards to Firestore ──────────────────────────────────────
-// Firestore batch limit = 500 ops. With max 8 chapters × 12 cards = 96 + 8 = 104 — safe.
-// But we split into batches of 200 for safety on very large sets.
+// Rolling batch — commits every 200 ops to stay well under Firestore's 500 limit.
 async function writeChaptersToFirestore(db, uploadRef, uploadId, chapters) {
   const now = new Date().toISOString();
   let totalCards = 0;
 
-  // Operations: 1 chapter doc + N card docs per chapter
-  // Keep a rolling batch, commit every 200 ops
   let batch = db.batch();
   let opsInBatch = 0;
 
@@ -257,7 +281,6 @@ async function writeChaptersToFirestore(db, uploadRef, uploadId, chapters) {
   };
 
   for (const chapter of chapters) {
-    // Create chapter document
     const chapterRef = uploadRef.collection('chapters').doc();
     const chapterId = chapterRef.id;
 
@@ -269,7 +292,6 @@ async function writeChaptersToFirestore(db, uploadRef, uploadId, chapters) {
       order: chapter.order,
     });
 
-    // Create card documents under this chapter
     for (const card of chapter.cards) {
       const cardRef = chapterRef.collection('cards').doc();
       addToBatch(cardRef, {
@@ -281,15 +303,10 @@ async function writeChaptersToFirestore(db, uploadRef, uploadId, chapters) {
       totalCards++;
     }
 
-    // Commit if approaching batch limit
-    if (opsInBatch >= 200) {
-      await commitBatch();
-    }
+    if (opsInBatch >= 200) await commitBatch();
   }
 
-  // Commit remaining ops
   await commitBatch();
-
   return { totalCards };
 }
 
@@ -300,7 +317,9 @@ async function markFailed(uploadRef, error) {
 
 function cleanupFile(filePath) {
   if (filePath && fs.existsSync(filePath)) {
-    try { fs.unlinkSync(filePath); } catch (_) {}
+    try {
+      fs.unlinkSync(filePath);
+    } catch (_) {}
   }
 }
 

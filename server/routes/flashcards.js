@@ -1,13 +1,20 @@
 const express = require('express');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Groq = require('groq-sdk');
 const { getFirestore } = require('../utils/firebase');
 
 const router = express.Router();
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // ─── POST /api/flashcards/generate ────────────────────────────────────────────
 router.post('/generate', async (req, res) => {
-  const { topicId, topicName, domainId, subjectId, examTags = [], difficulty = 'mixed' } = req.body;
+  const {
+    topicId,
+    topicName,
+    domainId,
+    subjectId,
+    examTags = [],
+    difficulty = 'mixed',
+  } = req.body;
 
   if (!topicId || !topicName || !domainId || !subjectId) {
     return res.status(400).json({
@@ -27,10 +34,8 @@ router.post('/generate', async (req, res) => {
     .collection('flashcards');
 
   // ── Check if cards already exist ───────────────────────────────────────────
-  // Use limit(1) instead of count() for broader Firebase Admin SDK compatibility
   const existing = await cardsRef.limit(1).get();
   if (!existing.empty) {
-    // Fetch actual count for the response
     const allExisting = await cardsRef.select().get();
     return res.json({
       success: true,
@@ -40,58 +45,67 @@ router.post('/generate', async (req, res) => {
     });
   }
 
-  // ── Build Gemini prompt ────────────────────────────────────────────────────
-  const examContext = examTags.length > 0
-    ? `This topic is relevant for: ${examTags.join(', ')}.`
-    : '';
+  // ── Build prompt ───────────────────────────────────────────────────────────
+  const examContext =
+    examTags.length > 0
+      ? `This topic is relevant for: ${examTags.join(', ')}.`
+      : '';
+
+  const difficultyBreakdown =
+    difficulty === 'mixed'
+      ? '10 easy, 12 medium, 8 hard'
+      : `all ${difficulty}`;
 
   const prompt = `
-You are an expert educator creating high-quality study flashcards for the topic: "${topicName}".
+You are an expert educator creating MCQ questions for the topic: "${topicName}".
 ${examContext}
 
-Generate exactly 30 flashcards as a JSON array. Use a mix of these types:
-- "flashcard": classic term/definition or question/answer (15 cards)
-- "mcq": multiple choice with 4 options (10 cards)
-- "fill_blank": sentence with a blank to fill (3 cards)
-- "true_false": true or false statement (2 cards)
+Generate exactly 30 multiple-choice questions as a JSON array.
 
-Difficulty distribution: ${difficulty === 'mixed' ? '10 easy, 12 medium, 8 hard' : `all ${difficulty}`}.
+Every question MUST have exactly 4 options and one correct answer.
 
-Return ONLY a valid JSON array with no markdown, no explanation, no code fences. Each object must have:
+Return ONLY a valid JSON array — no markdown, no code fences, no explanation.
+Each object must follow this exact shape:
 {
-  "type": "flashcard" | "mcq" | "fill_blank" | "true_false",
-  "front": "question or term or statement with ___",
-  "back": "answer or definition",
-  "options": ["A", "B", "C", "D"],   // only for mcq
-  "correctOption": 0,                 // 0-indexed, only for mcq
-  "explanation": "brief explanation", // optional, include for hard cards
-  "difficulty": "easy" | "medium" | "hard",
-  "tags": ["subtopic1", "subtopic2"]  // 1-2 relevant subtopics
+  "front": "The question text",
+  "back": "The correct answer text (must match the correct option exactly)",
+  "options": ["Option A text", "Option B text", "Option C text", "Option D text"],
+  "correctOption": 0,
+  "explanation": "Brief explanation of why this answer is correct",
+  "difficulty": "easy"
 }
 
 Rules:
-- front must be a clear, standalone question — no ambiguity
-- back must be concise and accurate
-- MCQ distractors must be plausible but clearly wrong
-- Tags must be specific subtopics within "${topicName}"
+- "correctOption" is 0-indexed (0 = first option, 1 = second, etc.)
+- Difficulty distribution: ${difficultyBreakdown}
+- Each question must be clear and standalone — no ambiguous wording
+- All 4 options must be plausible; wrong options must be clearly incorrect on reflection
 - No duplicate questions
-- Content must be factually accurate
+- "back" must be the exact text of the correct option
+- Content must be factually accurate for "${topicName}"
+- Tags must be specific subtopics within "${topicName}"
 `.trim();
 
-  // ── Call Gemini ────────────────────────────────────────────────────────────
+  // ── Call Groq ──────────────────────────────────────────────────────────────
   let cards;
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-    const result = await model.generateContent(prompt);
-    const text = result.response.text().trim();
+    const completion = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.6,
+      max_tokens: 8192,
+    });
 
-    // Strip markdown code fences if Gemini adds them despite instructions
-    const cleaned = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+    const text = completion.choices[0].message.content.trim();
+    const cleaned = text
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```\s*$/, '')
+      .trim();
+
     cards = JSON.parse(cleaned);
-
     if (!Array.isArray(cards)) throw new Error('Response is not an array');
   } catch (err) {
-    console.error('[GEMINI]', err.message);
+    console.error('[GROQ flashcards]', err.message);
     return res.status(500).json({
       success: false,
       message: 'AI generation failed. Please try again.',
@@ -99,7 +113,6 @@ Rules:
   }
 
   // ── Validate and write to Firestore ───────────────────────────────────────
-  const validTypes = ['flashcard', 'mcq', 'fill_blank', 'true_false'];
   const validDifficulties = ['easy', 'medium', 'hard'];
   const now = new Date().toISOString();
 
@@ -107,27 +120,26 @@ Rules:
   let written = 0;
 
   cards.forEach((card, index) => {
-    if (!card.front || !card.back) return; // skip malformed cards
-    if (!validTypes.includes(card.type)) card.type = 'flashcard';
-    if (!validDifficulties.includes(card.difficulty)) card.difficulty = 'medium';
+    if (!card.front || !Array.isArray(card.options) || card.options.length < 2) return;
 
     const ref = cardsRef.doc();
-    const data = {
+    batch.set(ref, {
       id: ref.id,
       topicId,
-      type: card.type,
+      type: 'mcq',
       front: String(card.front).trim(),
-      back: String(card.back).trim(),
-      options: card.type === 'mcq' && Array.isArray(card.options) ? card.options : [],
-      correctOption: card.type === 'mcq' ? (card.correctOption ?? 0) : null,
+      back: String(card.back ?? card.options[card.correctOption ?? 0]).trim(),
+      options: card.options.map(String).slice(0, 4),
+      correctOption: typeof card.correctOption === 'number' ? card.correctOption : 0,
       explanation: card.explanation ? String(card.explanation).trim() : null,
-      difficulty: card.difficulty,
+      difficulty: validDifficulties.includes(card.difficulty)
+        ? card.difficulty
+        : 'medium',
       tags: Array.isArray(card.tags) ? card.tags.slice(0, 3) : [],
       createdAt: now,
       generatedByAI: true,
       order: index,
-    };
-    batch.set(ref, data);
+    });
     written++;
   });
 
@@ -144,8 +156,7 @@ Rules:
 
   await topicRef.update({ totalCards: written });
 
-  console.log(`[FLASHCARDS] Generated ${written} cards for topic "${topicName}"`);
-
+  console.log(`[FLASHCARDS] Generated ${written} MCQ cards for topic "${topicName}"`);
   res.json({ success: true, cardCount: written, generated: true });
 });
 
