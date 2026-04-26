@@ -1,6 +1,4 @@
-import 'dart:math' as math;
-import 'dart:ui';
-
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,9 +7,41 @@ import 'package:go_router/go_router.dart';
 import 'package:orbitapp/core/constants/app_colors.dart';
 import 'package:orbitapp/core/constants/app_spacing.dart';
 import 'package:orbitapp/core/constants/app_text_styles.dart';
+import 'package:orbitapp/models/book_model.dart';
 import 'package:orbitapp/models/domain_model.dart';
+import 'package:orbitapp/models/subject_model.dart';
 import 'package:orbitapp/providers/library_provider.dart';
-import 'package:orbitapp/providers/progress_provider.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers — category colours / emojis keyed by Firestore domain id
+// ─────────────────────────────────────────────────────────────────────────────
+
+Color _catColor(String id) => switch (id) {
+      'school' => AppColors.kDomainSchool,
+      'competitive_exams' => AppColors.kDomainCompetitive,
+      'it_certifications' => AppColors.kDomainCertification,
+      'finance_certifications' => AppColors.kDomainFinance,
+      'language_aptitude' => AppColors.kDomainLanguage,
+      _ => AppColors.kPrimary,
+    };
+
+String _catEmoji(String id) => switch (id) {
+      'school' => '📚',
+      'competitive_exams' => '🏆',
+      'it_certifications' => '💻',
+      'finance_certifications' => '💹',
+      'language_aptitude' => '🌐',
+      _ => '🎓',
+    };
+
+List<Color> _catGradient(String id) => switch (id) {
+      'school' => const [Color(0xFF4ECDC4), Color(0xFF26A69A)],
+      'competitive_exams' => const [Color(0xFFFF6B9D), Color(0xFFE0587F)],
+      'it_certifications' => const [Color(0xFF7C6FE8), Color(0xFF5A4FBE)],
+      'finance_certifications' => const [Color(0xFFFFD43B), Color(0xFFE0A800)],
+      'language_aptitude' => const [Color(0xFF51CF66), Color(0xFF37B34D)],
+      _ => const [Color(0xFF7C6FE8), Color(0xFF4ECDC4)],
+    };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Screen
@@ -25,182 +55,271 @@ class LibraryScreen extends ConsumerStatefulWidget {
 }
 
 class _LibraryScreenState extends ConsumerState<LibraryScreen>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
+    with TickerProviderStateMixin {
+  late final AnimationController _entranceCtrl;
+  final _scrollCtrl = ScrollController();
 
-  // Header section
-  late final Animation<double> _headerFade;
-  late final Animation<Offset> _headerSlide;
-
-  // Search bar
-  late final Animation<double> _searchFade;
-  late final Animation<Offset> _searchSlide;
-
-  // Section label
-  late final Animation<double> _sectionFade;
+  // 0 = "All", then index into domains list
+  int _selectedCat = 0;
 
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(
+    _entranceCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1400),
+      duration: const Duration(milliseconds: 1000),
     )..forward();
-
-    _headerFade = CurvedAnimation(
-      parent: _ctrl,
-      curve: const Interval(0.0, 0.45, curve: Curves.easeOut),
-    );
-    _headerSlide = Tween<Offset>(
-      begin: const Offset(0, -0.15),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _ctrl,
-      curve: const Interval(0.0, 0.45, curve: Curves.easeOutCubic),
-    ));
-
-    _searchFade = CurvedAnimation(
-      parent: _ctrl,
-      curve: const Interval(0.12, 0.55, curve: Curves.easeOut),
-    );
-    _searchSlide = Tween<Offset>(
-      begin: const Offset(0, 0.3),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _ctrl,
-      curve: const Interval(0.12, 0.55, curve: Curves.easeOutCubic),
-    ));
-
-    _sectionFade = CurvedAnimation(
-      parent: _ctrl,
-      curve: const Interval(0.25, 0.65, curve: Curves.easeOut),
-    );
   }
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    _entranceCtrl.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
-  /// Staggered animation for each domain card.
-  Animation<double> _cardAnim(int index) => CurvedAnimation(
-        parent: _ctrl,
-        curve: Interval(
-          (0.30 + index * 0.07).clamp(0.0, 0.85),
-          (0.65 + index * 0.07).clamp(0.35, 1.0),
-          curve: Curves.easeOutCubic,
-        ),
-      );
-
   @override
   Widget build(BuildContext context) {
-    final domainsAsync   = ref.watch(domainsProvider);
-    final allProgressAsync = ref.watch(allProgressProvider);
-
-    // Domains the user has studied at least once
-    final studiedDomains = {
-      for (final p in allProgressAsync.valueOrNull ?? []) p.domainId,
-    };
+    final domainsAsync = ref.watch(domainsProvider);
 
     return Scaffold(
       backgroundColor: AppColors.kBackground,
       body: domainsAsync.when(
-        loading: () => _LoadingView(
-          headerFade: _headerFade,
-          headerSlide: _headerSlide,
-          searchFade: _searchFade,
-          searchSlide: _searchSlide,
-        ),
-        error: (e, _) => _ErrorView(
-          onRetry: () => ref.invalidate(domainsProvider),
-        ),
-        data: (domains) => CustomScrollView(
-          physics: const BouncingScrollPhysics(
-            parent: AlwaysScrollableScrollPhysics(),
+        loading: () => _buildSkeleton(),
+        error: (e, _) => _buildError(e),
+        data: (domains) => _buildContent(domains),
+      ),
+    );
+  }
+
+  // ── skeleton ───────────────────────────────────────────────────────────────
+
+  Widget _buildSkeleton() {
+    return SafeArea(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.sm),
+            child: _ShimmerBox(height: 36, width: 180),
           ),
-          slivers: [
-            // ── Decorative header ──────────────────────────────────────────
-            SliverToBoxAdapter(
-              child: FadeTransition(
-                opacity: _headerFade,
-                child: SlideTransition(
-                  position: _headerSlide,
-                  child: _LibraryHeader(domains: domains),
-                ),
-              ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: _ShimmerBox(height: 48, radius: AppSpacing.radiusXl),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          SizedBox(
+            height: 36,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+              itemCount: 5,
+              separatorBuilder: (context, index) =>
+                  const SizedBox(width: AppSpacing.sm),
+              itemBuilder: (_, i) =>
+                  _ShimmerBox(height: 36, width: 80 + i * 12.0,
+                      radius: AppSpacing.radiusFull),
             ),
-
-            // ── Search bar ─────────────────────────────────────────────────
-            SliverToBoxAdapter(
-              child: FadeTransition(
-                opacity: _searchFade,
-                child: SlideTransition(
-                  position: _searchSlide,
-                  child: const _SearchBar(),
-                ),
-              ),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: _ShimmerBox(height: 20, width: 120),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          SizedBox(
+            height: 200,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+              itemCount: 4,
+              separatorBuilder: (context, index) =>
+                  const SizedBox(width: AppSpacing.md),
+              itemBuilder: (ctx, _) =>
+                  _ShimmerBox(height: 200, width: 140),
             ),
+          ),
+        ],
+      ),
+    );
+  }
 
-            // ── Section label ──────────────────────────────────────────────
-            SliverToBoxAdapter(
-              child: FadeTransition(
-                opacity: _sectionFade,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.lg, AppSpacing.xl, AppSpacing.lg, AppSpacing.md),
-                  child: Row(
-                    children: [
-                      Text(
-                        'Browse Domains',
-                        style: AppTextStyles.headingSmall,
-                      ),
-                      const Spacer(),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.sm, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: AppColors.kPrimary.withValues(alpha: 0.12),
-                          borderRadius:
-                              BorderRadius.circular(AppSpacing.radiusFull),
-                        ),
-                        child: Text(
-                          '${domains.length} domains',
-                          style: AppTextStyles.caption.copyWith(
-                            color: AppColors.kPrimary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+  // ── error ──────────────────────────────────────────────────────────────────
+
+  Widget _buildError(Object e) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline_rounded,
+                color: AppColors.kError, size: 48),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              'Could not load library',
+              style: AppTextStyles.bodyMedium
+                  .copyWith(color: AppColors.kTextPrimary),
             ),
+            const SizedBox(height: AppSpacing.sm),
+            TextButton(
+              onPressed: () => ref.invalidate(domainsProvider),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-            // ── Domain grid ────────────────────────────────────────────────
-            SliverPadding(
+  // ── main content ───────────────────────────────────────────────────────────
+
+  Widget _buildContent(List<DomainModel> cats) {
+    // "All" = index 0, then cats[0], cats[1], …
+    final activeCat = _selectedCat == 0 ? null : cats[_selectedCat - 1];
+
+    return CustomScrollView(
+      controller: _scrollCtrl,
+      physics: const BouncingScrollPhysics(),
+      slivers: [
+        // ── fixed top bar ──────────────────────────────────────────────────
+        SliverToBoxAdapter(
+          child: SafeArea(
+            bottom: false,
+            child: _TopBar(ctrl: _entranceCtrl),
+          ),
+        ),
+
+        // ── search bar ─────────────────────────────────────────────────────
+        SliverToBoxAdapter(
+          child: FadeTransition(
+            opacity: CurvedAnimation(
+              parent: _entranceCtrl,
+              curve: const Interval(0.1, 0.5, curve: Curves.easeOut),
+            ),
+            child: Padding(
               padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xxxl),
-              sliver: SliverGrid(
-                gridDelegate:
-                    const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: AppSpacing.md,
-                  crossAxisSpacing: AppSpacing.md,
-                  childAspectRatio: 0.82,
+                  AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.md),
+              child: _SearchBar(),
+            ),
+          ),
+        ),
+
+        // ── category chips ─────────────────────────────────────────────────
+        SliverPersistentHeader(
+          pinned: true,
+          delegate: _ChipBarDelegate(
+            cats: cats,
+            selected: _selectedCat,
+            onSelect: (i) => setState(() => _selectedCat = i),
+            ctrl: _entranceCtrl,
+          ),
+        ),
+
+        // ── body ───────────────────────────────────────────────────────────
+        if (activeCat == null)
+          // "All" — one carousel section per category
+          ..._buildAllSections(cats)
+        else
+          // Specific category — subjects with book carousels
+          _buildCategorySection(activeCat),
+
+        const SliverToBoxAdapter(
+            child: SizedBox(height: AppSpacing.xxxl)),
+      ],
+    );
+  }
+
+  // ── "All" view: one row per category ──────────────────────────────────────
+
+  List<Widget> _buildAllSections(List<DomainModel> cats) {
+    return [
+      for (var i = 0; i < cats.length; i++)
+        SliverToBoxAdapter(
+          child: _CategoryRow(
+            cat: cats[i],
+            entrance: CurvedAnimation(
+              parent: _entranceCtrl,
+              curve: Interval(
+                0.15 + i * 0.07,
+                (0.55 + i * 0.07).clamp(0.0, 1.0),
+                curve: Curves.easeOut,
+              ),
+            ),
+            onSeeAll: () {
+              HapticFeedback.lightImpact();
+              setState(() => _selectedCat = i + 1);
+              _scrollCtrl.animateTo(
+                0,
+                duration: const Duration(milliseconds: 400),
+                curve: Curves.easeOut,
+              );
+            },
+          ),
+        ),
+    ];
+  }
+
+  // ── specific category: subjects → book carousels ───────────────────────────
+
+  Widget _buildCategorySection(DomainModel cat) {
+    return _SliverSubjectList(cat: cat);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Top bar
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TopBar extends StatelessWidget {
+  final AnimationController ctrl;
+
+  const _TopBar({required this.ctrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: CurvedAnimation(
+        parent: ctrl,
+        curve: const Interval(0.0, 0.4, curve: Curves.easeOut),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg, AppSpacing.md, AppSpacing.md, 0),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Browse',
+                    style: AppTextStyles.displayMedium,
+                  ),
+                  Text(
+                    'Find your next subject to master',
+                    style: AppTextStyles.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              onPressed: () => context.go('/home/search'),
+              icon: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppColors.kSurface,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.kBorder),
                 ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final domain = domains[index];
-                    return _AnimatedDomainCard(
-                      domain: domain,
-                      animation: _cardAnim(index),
-                      isStudied: studiedDomains.contains(domain.id),
-                      index: index,
-                    );
-                  },
-                  childCount: domains.length,
+                child: const Icon(
+                  Icons.search_rounded,
+                  color: AppColors.kTextPrimary,
+                  size: 20,
                 ),
               ),
             ),
@@ -212,549 +331,525 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Library header  — decorative orbs + title + stats
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _LibraryHeader extends StatelessWidget {
-  final List<DomainModel> domains;
-  const _LibraryHeader({required this.domains});
-
-  @override
-  Widget build(BuildContext context) {
-    final totalTopics =
-        domains.fold<int>(0, (sum, d) => sum + d.totalTopics);
-
-    return SizedBox(
-      height: 220,
-      child: Stack(
-        children: [
-          // ── Decorative background orbs ─────────────────────────────────
-          Positioned(
-            top: -30,
-            right: -20,
-            child: _Orb(size: 180, color: AppColors.kPrimary, opacity: 0.10),
-          ),
-          Positioned(
-            top: 60,
-            left: -40,
-            child: _Orb(size: 140, color: AppColors.kSecondary, opacity: 0.08),
-          ),
-          Positioned(
-            bottom: 0,
-            right: 60,
-            child: _Orb(size: 100, color: AppColors.kAccent, opacity: 0.06),
-          ),
-
-          // ── Status bar spacer + content ────────────────────────────────
-          SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Top row: title + optional icon
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Eyebrow
-                            Text(
-                              'KNOWLEDGE BASE',
-                              style: AppTextStyles.caption.copyWith(
-                                color: AppColors.kPrimary,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 1.4,
-                                fontSize: 10,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            // Main title
-                            ShaderMask(
-                              shaderCallback: (bounds) =>
-                                  const LinearGradient(
-                                colors: [
-                                  AppColors.kTextPrimary,
-                                  AppColors.kPrimaryLight,
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ).createShader(bounds),
-                              child: Text(
-                                'Your\nLibrary',
-                                style: AppTextStyles.displayLarge.copyWith(
-                                  color: Colors.white,
-                                  height: 1.1,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      // Stats pill
-                      Container(
-                        padding: const EdgeInsets.all(AppSpacing.md),
-                        decoration: BoxDecoration(
-                          color: AppColors.kSurface,
-                          borderRadius:
-                              BorderRadius.circular(AppSpacing.radiusMd),
-                          border: Border.all(color: AppColors.kBorder),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '$totalTopics',
-                              style: AppTextStyles.headingMedium.copyWith(
-                                color: AppColors.kPrimary,
-                              ),
-                            ),
-                            Text('topics',
-                                style: AppTextStyles.caption
-                                    .copyWith(fontSize: 10)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Spacer(),
-                  // Subtitle
-                  Text(
-                    '${domains.length} domains · Tap to explore',
-                    style: AppTextStyles.bodyMedium.copyWith(
-                      color: AppColors.kTextSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Decorative blurred orb
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _Orb extends StatelessWidget {
-  final double size;
-  final Color color;
-  final double opacity;
-
-  const _Orb(
-      {required this.size, required this.color, required this.opacity});
-
-  @override
-  Widget build(BuildContext context) {
-    return ImageFiltered(
-      imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: color.withValues(alpha: opacity),
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Sticky search bar — tapping navigates to search
+// Search bar (tap → navigate, no shortcuts)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SearchBar extends StatefulWidget {
-  const _SearchBar();
-
   @override
   State<_SearchBar> createState() => _SearchBarState();
 }
 
 class _SearchBarState extends State<_SearchBar>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _glowCtrl;
-  late final Animation<double> _glow;
+  late final AnimationController _glow;
 
   @override
   void initState() {
     super.initState();
-    _glowCtrl = AnimationController(
+    _glow = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1800),
     )..repeat(reverse: true);
-    _glow = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _glowCtrl, curve: Curves.easeInOut),
-    );
   }
 
   @override
   void dispose() {
-    _glowCtrl.dispose();
+    _glow.dispose();
     super.dispose();
   }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-      child: AnimatedBuilder(
-        animation: _glow,
-        builder: (context, _) => GestureDetector(
-          onTap: () {
-            HapticFeedback.lightImpact();
-            context.go('/home/search');
-          },
-          child: Container(
-            height: 52,
-            decoration: BoxDecoration(
-              color: AppColors.kSurface,
-              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-              border: Border.all(
-                color: AppColors.kPrimary
-                    .withValues(alpha: 0.2 * _glow.value + 0.1),
-                width: 1.5,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.kPrimary
-                      .withValues(alpha: 0.06 * _glow.value),
-                  blurRadius: 16,
-                  spreadRadius: 2,
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                const SizedBox(width: AppSpacing.md),
-                Icon(
-                  Icons.search_rounded,
-                  color: AppColors.kPrimary.withValues(alpha: 0.7),
-                  size: 20,
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Text(
-                    'Search topics, books, chapters...',
-                    style: AppTextStyles.bodyMedium.copyWith(
-                      color: AppColors.kTextDisabled,
-                    ),
-                  ),
-                ),
-                Container(
-                  margin: const EdgeInsets.only(right: AppSpacing.sm),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.sm, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.kPrimary.withValues(alpha: 0.12),
-                    borderRadius:
-                        BorderRadius.circular(AppSpacing.radiusSm),
-                  ),
-                  child: Text(
-                    '⌘ K',
-                    style: AppTextStyles.caption.copyWith(
-                      color: AppColors.kPrimary,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 10,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Animated domain card wrapper (entrance animation)
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _AnimatedDomainCard extends StatelessWidget {
-  final DomainModel domain;
-  final Animation<double> animation;
-  final bool isStudied;
-  final int index;
-
-  const _AnimatedDomainCard({
-    required this.domain,
-    required this.animation,
-    required this.isStudied,
-    required this.index,
-  });
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: animation,
-      builder: (_, child) => Opacity(
-        opacity: animation.value,
-        child: Transform.translate(
-          offset: Offset(0, 36 * (1 - animation.value)),
-          child: Transform.scale(
-            scale: 0.88 + 0.12 * animation.value,
-            child: child,
+      animation: _glow,
+      builder: (context, _) => GestureDetector(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          context.go('/home/search');
+        },
+        child: Container(
+          height: 48,
+          decoration: BoxDecoration(
+            color: AppColors.kSurface,
+            borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
+            border: Border.all(color: AppColors.kBorder),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.kPrimary
+                    .withValues(alpha: 0.06 + _glow.value * 0.08),
+                blurRadius: 12,
+                spreadRadius: 0,
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              const SizedBox(width: AppSpacing.md),
+              const Icon(Icons.search_rounded,
+                  color: AppColors.kTextSecondary, size: 20),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                'Search books, subjects…',
+                style: AppTextStyles.bodyMedium
+                    .copyWith(color: AppColors.kTextSecondary),
+              ),
+            ],
           ),
         ),
-      ),
-      child: _DomainCard(
-        domain: domain,
-        isStudied: isStudied,
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Domain card — interactive with press animation
+// Sticky category chip bar
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _DomainCard extends StatefulWidget {
-  final DomainModel domain;
-  final bool isStudied;
+class _ChipBarDelegate extends SliverPersistentHeaderDelegate {
+  final List<DomainModel> cats;
+  final int selected;
+  final ValueChanged<int> onSelect;
+  final AnimationController ctrl;
 
-  const _DomainCard({
-    required this.domain,
-    required this.isStudied,
+  const _ChipBarDelegate({
+    required this.cats,
+    required this.selected,
+    required this.onSelect,
+    required this.ctrl,
   });
 
   @override
-  State<_DomainCard> createState() => _DomainCardState();
+  double get minExtent => 52;
+  @override
+  double get maxExtent => 52;
+
+  @override
+  bool shouldRebuild(_ChipBarDelegate o) =>
+      o.selected != selected || o.cats.length != cats.length;
+
+  @override
+  Widget build(
+      BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppColors.kBackground.withValues(
+            alpha: (shrinkOffset / maxExtent).clamp(0.0, 1.0) * 0.95 + 0.7),
+      ),
+      child: FadeTransition(
+        opacity: CurvedAnimation(
+          parent: ctrl,
+          curve: const Interval(0.2, 0.6, curve: Curves.easeOut),
+        ),
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+          itemCount: cats.length + 1,
+          separatorBuilder: (context, index) =>
+              const SizedBox(width: AppSpacing.sm),
+          itemBuilder: (_, i) {
+            final isAll = i == 0;
+            final isSelected = selected == i;
+            final catId = isAll ? '' : cats[i - 1].id;
+            final label = isAll ? 'All' : cats[i - 1].name;
+            final color = isAll ? AppColors.kPrimary : _catColor(catId);
+
+            return _CategoryChip(
+              label: label,
+              emoji: isAll ? null : _catEmoji(catId),
+              color: color,
+              isSelected: isSelected,
+              onTap: () {
+                HapticFeedback.lightImpact();
+                onSelect(i);
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
 }
 
-class _DomainCardState extends State<_DomainCard>
+class _CategoryChip extends StatefulWidget {
+  final String label;
+  final String? emoji;
+  final Color color;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _CategoryChip({
+    required this.label,
+    required this.color,
+    required this.isSelected,
+    required this.onTap,
+    this.emoji,
+  });
+
+  @override
+  State<_CategoryChip> createState() => _CategoryChipState();
+}
+
+class _CategoryChipState extends State<_CategoryChip>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _pressCtrl;
-  late final Animation<double> _pressScale;
+  late final AnimationController _press;
 
   @override
   void initState() {
     super.initState();
-    _pressCtrl = AnimationController(
+    _press = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 110),
-      lowerBound: 0.0,
+      duration: const Duration(milliseconds: 80),
+      reverseDuration: const Duration(milliseconds: 140),
+      lowerBound: 0.92,
       upperBound: 1.0,
       value: 1.0,
-    );
-    _pressScale = Tween<double>(begin: 0.94, end: 1.0).animate(
-      CurvedAnimation(parent: _pressCtrl, curve: Curves.easeOut),
     );
   }
 
   @override
   void dispose() {
-    _pressCtrl.dispose();
+    _press.dispose();
     super.dispose();
   }
 
-  Color get _domainColor {
-    final h = widget.domain.colorHex.replaceAll('#', '');
-    try {
-      return Color(int.parse('0xFF$h'));
-    } catch (_) {
-      return AppColors.kPrimary;
-    }
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => _press.reverse(),
+      onTapUp: (_) {
+        _press.forward();
+        widget.onTap();
+      },
+      onTapCancel: () => _press.forward(),
+      child: AnimatedBuilder(
+        animation: _press,
+        builder: (_, child) =>
+            Transform.scale(scale: _press.value, child: child),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+          decoration: BoxDecoration(
+            gradient: widget.isSelected
+                ? LinearGradient(
+                    colors: [widget.color, widget.color.withValues(alpha: 0.7)],
+                  )
+                : null,
+            color: widget.isSelected ? null : AppColors.kSurface,
+            borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
+            border: Border.all(
+              color: widget.isSelected
+                  ? Colors.transparent
+                  : AppColors.kBorder,
+            ),
+            boxShadow: widget.isSelected
+                ? [
+                    BoxShadow(
+                      color: widget.color.withValues(alpha: 0.35),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (widget.emoji != null) ...[
+                Text(widget.emoji!,
+                    style: const TextStyle(fontSize: 13)),
+                const SizedBox(width: 5),
+              ],
+              Text(
+                widget.label,
+                style: AppTextStyles.labelSmall.copyWith(
+                  color: widget.isSelected
+                      ? Colors.white
+                      : AppColors.kTextSecondary,
+                  fontWeight: widget.isSelected
+                      ? FontWeight.w700
+                      : FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// "All" view — one category row with horizontal subject carousel
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _CategoryRow extends ConsumerWidget {
+  final DomainModel cat;
+  final Animation<double> entrance;
+  final VoidCallback onSeeAll;
+
+  const _CategoryRow({
+    required this.cat,
+    required this.entrance,
+    required this.onSeeAll,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final subjectsAsync = ref.watch(subjectsProvider(cat.id));
+    final color = _catColor(cat.id);
+    final emoji = _catEmoji(cat.id);
+    final gradient = _catGradient(cat.id);
+
+    return FadeTransition(
+      opacity: entrance,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.12),
+          end: Offset.zero,
+        ).animate(entrance),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Section header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg, AppSpacing.xl, AppSpacing.lg, AppSpacing.md),
+              child: Row(
+                children: [
+                  // Emoji badge
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: gradient,
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius:
+                          BorderRadius.circular(AppSpacing.radiusSm),
+                    ),
+                    child: Center(
+                      child: Text(emoji,
+                          style: const TextStyle(fontSize: 15)),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      cat.name,
+                      style: AppTextStyles.headingSmall,
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: onSeeAll,
+                    child: Text(
+                      'See all',
+                      style: AppTextStyles.caption.copyWith(
+                        color: color,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Horizontal carousel
+            subjectsAsync.when(
+              loading: () => _SubjectCarouselSkeleton(),
+              error: (err, _) => const SizedBox.shrink(),
+              data: (subjects) => subjects.isEmpty
+                  ? const SizedBox.shrink()
+                  : SizedBox(
+                      height: 195,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        physics: const BouncingScrollPhysics(),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.lg),
+                        itemCount: subjects.length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(width: AppSpacing.md),
+                        itemBuilder: (ctx, i) => _SubjectCard(
+                          subject: subjects[i],
+                          catId: cat.id,
+                          color: color,
+                          gradient: gradient,
+                        ),
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Subject card in the "All" carousel — shows subject as a book-spine card
+class _SubjectCard extends StatefulWidget {
+  final SubjectModel subject;
+  final String catId;
+  final Color color;
+  final List<Color> gradient;
+
+  const _SubjectCard({
+    required this.subject,
+    required this.catId,
+    required this.color,
+    required this.gradient,
+  });
+
+  @override
+  State<_SubjectCard> createState() => _SubjectCardState();
+}
+
+class _SubjectCardState extends State<_SubjectCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _press;
+
+  @override
+  void initState() {
+    super.initState();
+    _press = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 90),
+      reverseDuration: const Duration(milliseconds: 180),
+      lowerBound: 0.94,
+      upperBound: 1.0,
+      value: 1.0,
+    );
   }
 
-  String _emojiForDomain(String id) => switch (id) {
-        'school'                  => '🏫',
-        'competitive_exams'       => '🎯',
-        'it_certifications'       => '💻',
-        'finance_certifications'  => '📈',
-        'language_aptitude'       => '🌐',
-        _                         => '📚',
-      };
+  @override
+  void dispose() {
+    _press.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final color = _domainColor;
-    final emoji = _emojiForDomain(widget.domain.id);
+    final subject = widget.subject;
 
     return GestureDetector(
       onTapDown: (_) {
         HapticFeedback.lightImpact();
-        _pressCtrl.reverse();
+        _press.reverse();
       },
       onTapUp: (_) {
-        _pressCtrl.forward();
-        context.push('/home/library/${widget.domain.id}');
+        _press.forward();
+        context.push('/home/library/${widget.catId}/${subject.id}');
       },
-      onTapCancel: () => _pressCtrl.forward(),
+      onTapCancel: () => _press.forward(),
       child: AnimatedBuilder(
-        animation: _pressScale,
+        animation: _press,
         builder: (_, child) =>
-            Transform.scale(scale: _pressScale.value, child: child),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
-            // Multi-stop gradient for depth
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              stops: const [0.0, 0.45, 1.0],
-              colors: [
-                color.withValues(alpha: 0.22),
-                color.withValues(alpha: 0.14),
-                color.withValues(alpha: 0.06),
-              ],
-            ),
-            border: Border.all(
-              color: color.withValues(alpha: 0.30),
-              width: 1.5,
-            ),
-            boxShadow: [
-              // Colour glow
-              BoxShadow(
-                color: color.withValues(alpha: 0.12),
-                blurRadius: 20,
-                spreadRadius: 0,
-                offset: const Offset(0, 6),
-              ),
-              // Dark shadow for depth
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.25),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
-            child: Stack(
-              children: [
-                // ── Radial highlight (top-right) ───────────────────────
-                Positioned(
-                  top: -20,
-                  right: -20,
-                  child: Container(
-                    width: 100,
-                    height: 100,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          color.withValues(alpha: 0.20),
-                          Colors.transparent,
-                        ],
-                      ),
+            Transform.scale(scale: _press.value, child: child),
+        child: SizedBox(
+          width: 140,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Cover card — book-spine style
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: widget.gradient,
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
-                  ),
-                ),
-
-                // ── Noise grain overlay ────────────────────────────────
-                Positioned.fill(
-                  child: CustomPaint(painter: _GrainPainter(color: color)),
-                ),
-
-                // ── Card content ───────────────────────────────────────
-                Padding(
-                  padding: const EdgeInsets.all(AppSpacing.lg),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Emoji icon in frosted container
-                      _EmojiContainer(emoji: emoji, color: color),
-
-                      const Spacer(),
-
-                      // Domain name
-                      Text(
-                        widget.domain.name,
-                        style: AppTextStyles.bodyLarge.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.kTextPrimary,
-                          height: 1.2,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                    borderRadius:
+                        BorderRadius.circular(AppSpacing.radiusMd),
+                    boxShadow: [
+                      BoxShadow(
+                        color:
+                            widget.color.withValues(alpha: 0.3),
+                        blurRadius: 14,
+                        offset: const Offset(0, 6),
                       ),
-
-                      const SizedBox(height: AppSpacing.sm),
-
-                      // Bottom row: topics + studied badge
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          // Topics pill
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: color.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(
-                                  AppSpacing.radiusFull),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.collections_bookmark_rounded,
-                                    size: 10, color: color),
-                                const SizedBox(width: 4),
-                                Text(
-                                  '${widget.domain.totalTopics}',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: color,
-                                  ),
-                                ),
-                              ],
-                            ),
+                    ],
+                  ),
+                  child: Stack(
+                    children: [
+                      // Radial highlight
+                      Positioned(
+                        top: -20,
+                        left: -20,
+                        child: Container(
+                          width: 100,
+                          height: 100,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color:
+                                Colors.white.withValues(alpha: 0.12),
                           ),
-                          const Spacer(),
-                          // Studied indicator OR arrow
-                          if (widget.isStudied)
+                        ),
+                      ),
+                      // Content
+                      Padding(
+                        padding: const EdgeInsets.all(AppSpacing.md),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              subject.name,
+                              style: AppTextStyles.labelMedium
+                                  .copyWith(color: Colors.white),
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: AppSpacing.xs),
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 3),
+                                  horizontal: AppSpacing.sm,
+                                  vertical: 2),
                               decoration: BoxDecoration(
-                                color: AppColors.kSuccess
-                                    .withValues(alpha: 0.15),
+                                color: Colors.white
+                                    .withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(
                                     AppSpacing.radiusFull),
                               ),
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.check_circle_rounded,
-                                      size: 10,
-                                      color: AppColors.kSuccess),
-                                  SizedBox(width: 3),
-                                  Text(
-                                    'Studied',
-                                    style: TextStyle(
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppColors.kSuccess,
-                                    ),
-                                  ),
-                                ],
+                              child: Text(
+                                '${subject.totalTopics} books',
+                                style: AppTextStyles.caption
+                                    .copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                            )
-                          else
-                            Icon(
-                              Icons.arrow_forward_ios_rounded,
-                              size: 12,
-                              color: color.withValues(alpha: 0.7),
                             ),
-                        ],
+                          ],
+                        ),
                       ),
                     ],
                   ),
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                subject.name,
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.kTextPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (subject.applicableExams.isNotEmpty)
+                Text(
+                  subject.applicableExams.take(2).join(' · '),
+                  style: AppTextStyles.caption,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+            ],
           ),
         ),
       ),
@@ -762,133 +857,219 @@ class _DomainCardState extends State<_DomainCard>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Frosted emoji container inside each domain card
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _EmojiContainer extends StatelessWidget {
-  final String emoji;
-  final Color color;
-
-  const _EmojiContainer({required this.emoji, required this.color});
-
+class _SubjectCarouselSkeleton extends StatefulWidget {
   @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          width: 52,
-          height: 52,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            border: Border.all(
-              color: color.withValues(alpha: 0.25),
-            ),
-          ),
-          alignment: Alignment.center,
-          child: Text(emoji, style: const TextStyle(fontSize: 26)),
-        ),
-      ),
-    );
-  }
+  State<_SubjectCarouselSkeleton> createState() =>
+      _SubjectCarouselSkeletonState();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Subtle noise grain painter — adds micro-texture to cards
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _GrainPainter extends CustomPainter {
-  final Color color;
-  static final _rng = math.Random(42); // fixed seed for consistency
-
-  const _GrainPainter({required this.color});
+class _SubjectCarouselSkeletonState
+    extends State<_SubjectCarouselSkeleton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _a;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..style = PaintingStyle.fill;
-    for (int i = 0; i < 80; i++) {
-      final x = _rng.nextDouble() * size.width;
-      final y = _rng.nextDouble() * size.height;
-      final r = _rng.nextDouble() * 1.2 + 0.3;
-      paint.color = color.withValues(alpha: _rng.nextDouble() * 0.06);
-      canvas.drawCircle(Offset(x, y), r, paint);
-    }
+  void initState() {
+    super.initState();
+    _a = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1300),
+    )..repeat();
   }
 
   @override
-  bool shouldRepaint(_GrainPainter old) => false; // static grain
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Shimmer loading view
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _LoadingView extends StatelessWidget {
-  final Animation<double> headerFade;
-  final Animation<Offset> headerSlide;
-  final Animation<double> searchFade;
-  final Animation<Offset> searchSlide;
-
-  const _LoadingView({
-    required this.headerFade,
-    required this.headerSlide,
-    required this.searchFade,
-    required this.searchSlide,
-  });
+  void dispose() {
+    _a.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return CustomScrollView(
-      physics: const NeverScrollableScrollPhysics(),
-      slivers: [
-        // Placeholder header
-        SliverToBoxAdapter(
-          child: FadeTransition(
-            opacity: headerFade,
-            child: SlideTransition(
-              position: headerSlide,
-              child: _ShimmerBox(
-                  height: 220, margin: EdgeInsets.zero),
-            ),
-          ),
-        ),
-        // Placeholder search
-        SliverToBoxAdapter(
-          child: FadeTransition(
-            opacity: searchFade,
-            child: SlideTransition(
-              position: searchSlide,
-              child: const _ShimmerBox(
-                height: 52,
-                margin: EdgeInsets.symmetric(
-                    horizontal: AppSpacing.lg),
+    return SizedBox(
+      height: 195,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+        itemCount: 4,
+        separatorBuilder: (context, index) =>
+            const SizedBox(width: AppSpacing.md),
+        itemBuilder: (_, i) => AnimatedBuilder(
+          animation: _a,
+          builder: (_, child) => SizedBox(
+            width: 140,
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius:
+                    BorderRadius.circular(AppSpacing.radiusMd),
+                gradient: LinearGradient(
+                  begin:
+                      Alignment(_a.value * 3 - 1.5, 0),
+                  end: Alignment(
+                      _a.value * 3 + 0.5, 0),
+                  colors: const [
+                    AppColors.kSurface,
+                    AppColors.kSurfaceVariant,
+                    AppColors.kSurface,
+                  ],
+                ),
               ),
             ),
           ),
         ),
-        const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xl + AppSpacing.md)),
-        // Grid shimmer
-        SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-          sliver: SliverGrid(
-            gridDelegate:
-                const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              mainAxisSpacing: AppSpacing.md,
-              crossAxisSpacing: AppSpacing.md,
-              childAspectRatio: 0.82,
-            ),
-            delegate: SliverChildBuilderDelegate(
-              (ctx, _) => const _ShimmerBox(
-                  height: double.infinity,
-                  margin: EdgeInsets.zero,
-                  radius: AppSpacing.radiusXl),
-              childCount: 6,
-            ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Specific category view — subjects each with a book carousel
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SliverSubjectList extends ConsumerWidget {
+  final DomainModel cat;
+
+  const _SliverSubjectList({required this.cat});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final subjectsAsync = ref.watch(subjectsProvider(cat.id));
+
+    return subjectsAsync.when(
+      loading: () => SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          child: const Center(
+            child:
+                CircularProgressIndicator(color: AppColors.kPrimary),
           ),
+        ),
+      ),
+      error: (e, _) => SliverToBoxAdapter(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.xl),
+            child: Text('Could not load subjects',
+                style: AppTextStyles.bodySmall),
+          ),
+        ),
+      ),
+      data: (subjects) {
+        if (subjects.isEmpty) {
+          return SliverFillRemaining(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('📖', style: TextStyle(fontSize: 48)),
+                  const SizedBox(height: AppSpacing.md),
+                  Text('No content yet',
+                      style: AppTextStyles.bodyLarge
+                          .copyWith(color: AppColors.kTextPrimary)),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (ctx, i) => _SubjectSection(
+              subject: subjects[i],
+              catId: cat.id,
+              catColor: _catColor(cat.id),
+            ),
+            childCount: subjects.length,
+          ),
+        );
+      },
+    );
+  }
+}
+
+// Each subject becomes a book-carousel section
+class _SubjectSection extends ConsumerWidget {
+  final SubjectModel subject;
+  final String catId;
+  final Color catColor;
+
+  const _SubjectSection({
+    required this.subject,
+    required this.catId,
+    required this.catColor,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final booksAsync = ref.watch(
+        booksProvider((domainId: catId, subjectId: subject.id)));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Subject header
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg, AppSpacing.xl, AppSpacing.lg, AppSpacing.md),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(subject.name, style: AppTextStyles.headingSmall),
+                    if (subject.applicableExams.isNotEmpty)
+                      Text(
+                        subject.applicableExams.take(3).join(' · '),
+                        style: AppTextStyles.caption,
+                      ),
+                  ],
+                ),
+              ),
+              GestureDetector(
+                onTap: () => context
+                    .push('/home/library/$catId/${subject.id}'),
+                child: Text(
+                  'See all',
+                  style: AppTextStyles.caption.copyWith(
+                    color: catColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Books carousel
+        booksAsync.when(
+          loading: () => _BookCarouselSkeleton(),
+          error: (err, _) => const SizedBox.shrink(),
+          data: (books) => books.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.lg),
+                  child: Text(
+                    'No books yet — check back soon.',
+                    style: AppTextStyles.caption,
+                  ),
+                )
+              : SizedBox(
+                  height: 220,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.lg),
+                    itemCount: books.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(width: AppSpacing.md),
+                    itemBuilder: (ctx, i) => _BookCarouselCard(
+                      book: books[i],
+                      catId: catId,
+                      subjectId: subject.id,
+                    ),
+                  ),
+                ),
         ),
       ],
     );
@@ -896,17 +1077,264 @@ class _LoadingView extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shimmer box widget
+// Book carousel card
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BookCarouselCard extends StatefulWidget {
+  final BookModel book;
+  final String catId;
+  final String subjectId;
+
+  const _BookCarouselCard({
+    required this.book,
+    required this.catId,
+    required this.subjectId,
+  });
+
+  @override
+  State<_BookCarouselCard> createState() => _BookCarouselCardState();
+}
+
+class _BookCarouselCardState extends State<_BookCarouselCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _press;
+
+  @override
+  void initState() {
+    super.initState();
+    _press = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 90),
+      reverseDuration: const Duration(milliseconds: 180),
+      lowerBound: 0.94,
+      upperBound: 1.0,
+      value: 1.0,
+    );
+  }
+
+  @override
+  void dispose() {
+    _press.dispose();
+    super.dispose();
+  }
+
+  // A deterministic gradient per book title
+  static const _palettes = [
+    [Color(0xFF7C6FE8), Color(0xFF4ECDC4)],
+    [Color(0xFFFF6B9D), Color(0xFFFF9F43)],
+    [Color(0xFF51CF66), Color(0xFF4ECDC4)],
+    [Color(0xFFFFD43B), Color(0xFFFF6B9D)],
+    [Color(0xFF4ECDC4), Color(0xFF7C6FE8)],
+    [Color(0xFFFF9F43), Color(0xFF7C6FE8)],
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final book = widget.book;
+    final palette = _palettes[
+        book.title.isNotEmpty ? book.title.codeUnitAt(0) % _palettes.length : 0];
+
+    return GestureDetector(
+      onTapDown: (_) {
+        HapticFeedback.lightImpact();
+        _press.reverse();
+      },
+      onTapUp: (_) {
+        _press.forward();
+        context.push(
+            '/home/library/${widget.catId}/${widget.subjectId}/${book.id}');
+      },
+      onTapCancel: () => _press.forward(),
+      child: AnimatedBuilder(
+        animation: _press,
+        builder: (_, child) =>
+            Transform.scale(scale: _press.value, child: child),
+        child: SizedBox(
+          width: 130,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Cover
+              Expanded(
+                child: ClipRRect(
+                  borderRadius:
+                      BorderRadius.circular(AppSpacing.radiusMd),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      book.coverUrl.isNotEmpty
+                          ? CachedNetworkImage(
+                              imageUrl: book.coverUrl,
+                              fit: BoxFit.cover,
+                              placeholder: (ctx, url) =>
+                                  _GradCover(palette: palette, title: book.title),
+                              errorWidget: (ctx, url, err) =>
+                                  _GradCover(palette: palette, title: book.title),
+                            )
+                          : _GradCover(palette: palette, title: book.title),
+                      // Subtle sheen border
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.08)),
+                          borderRadius:
+                              BorderRadius.circular(AppSpacing.radiusMd),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                book.title,
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.kTextPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (book.authors.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(
+                  book.authors.first,
+                  style: AppTextStyles.caption,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              const SizedBox(height: AppSpacing.xs),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.sm, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.kPrimaryContainer,
+                      borderRadius:
+                          BorderRadius.circular(AppSpacing.radiusFull),
+                    ),
+                    child: Text(
+                      '${book.totalChapters} ch',
+                      style: AppTextStyles.caption.copyWith(
+                        color: AppColors.kPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GradCover extends StatelessWidget {
+  final List<Color> palette;
+  final String title;
+
+  const _GradCover({required this.palette, required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: palette,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        title.isNotEmpty ? title[0].toUpperCase() : '?',
+        style: const TextStyle(
+          fontSize: 44,
+          fontWeight: FontWeight.w800,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+}
+
+class _BookCarouselSkeleton extends StatefulWidget {
+  @override
+  State<_BookCarouselSkeleton> createState() => _BookCarouselSkeletonState();
+}
+
+class _BookCarouselSkeletonState extends State<_BookCarouselSkeleton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _a;
+
+  @override
+  void initState() {
+    super.initState();
+    _a = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1300),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _a.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 220,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding:
+            const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+        itemCount: 4,
+        separatorBuilder: (context, index) =>
+            const SizedBox(width: AppSpacing.md),
+        itemBuilder: (ctx, _) => AnimatedBuilder(
+          animation: _a,
+          builder: (ctx2, child) => SizedBox(
+            width: 130,
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius:
+                    BorderRadius.circular(AppSpacing.radiusMd),
+                gradient: LinearGradient(
+                  begin: Alignment(_a.value * 3 - 1.5, 0),
+                  end: Alignment(_a.value * 3 + 0.5, 0),
+                  colors: const [
+                    AppColors.kSurface,
+                    AppColors.kSurfaceVariant,
+                    AppColors.kSurface,
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared shimmer box
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ShimmerBox extends StatefulWidget {
   final double height;
-  final EdgeInsets margin;
+  final double? width;
   final double radius;
 
   const _ShimmerBox({
     required this.height,
-    required this.margin,
+    this.width,
     this.radius = AppSpacing.radiusMd,
   });
 
@@ -916,105 +1344,39 @@ class _ShimmerBox extends StatefulWidget {
 
 class _ShimmerBoxState extends State<_ShimmerBox>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _shCtrl;
-  late final Animation<double> _shAnim;
+  late final AnimationController _a;
 
   @override
   void initState() {
     super.initState();
-    _shCtrl = AnimationController(
+    _a = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1400),
+      duration: const Duration(milliseconds: 1300),
     )..repeat();
-    _shAnim = Tween<double>(begin: -2, end: 2).animate(
-      CurvedAnimation(parent: _shCtrl, curve: Curves.easeInOut),
-    );
   }
 
   @override
   void dispose() {
-    _shCtrl.dispose();
+    _a.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: _shAnim,
-      builder: (ctx, _) => Container(
-        height: widget.height == double.infinity ? null : widget.height,
-        margin: widget.margin,
+      animation: _a,
+      builder: (_, child) => Container(
+        height: widget.height,
+        width: widget.width,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(widget.radius),
           gradient: LinearGradient(
-            begin: Alignment(_shAnim.value - 1, 0),
-            end: Alignment(_shAnim.value + 1, 0),
+            begin: Alignment(_a.value * 3 - 1.5, 0),
+            end: Alignment(_a.value * 3 + 0.5, 0),
             colors: const [
               AppColors.kSurface,
               AppColors.kSurfaceVariant,
               AppColors.kSurface,
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Error view
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _ErrorView extends StatelessWidget {
-  final VoidCallback onRetry;
-  const _ErrorView({required this.onRetry});
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.xl),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: AppColors.kError.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.wifi_off_rounded,
-                    color: AppColors.kError, size: 32),
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              Text('Could not load library',
-                  style: AppTextStyles.headingSmall,
-                  textAlign: TextAlign.center),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                'Check your connection and try again.',
-                style: AppTextStyles.bodyMedium
-                    .copyWith(color: AppColors.kTextSecondary),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: AppSpacing.xl),
-              FilledButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Try again'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.kPrimary,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.xl,
-                      vertical: AppSpacing.md),
-                  shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(AppSpacing.radiusMd),
-                  ),
-                ),
-              ),
             ],
           ),
         ),
