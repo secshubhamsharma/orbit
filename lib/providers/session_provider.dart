@@ -173,13 +173,15 @@ class SessionNotifier extends StateNotifier<SessionState> {
   Future<void> _persistSession(Map<String, String> ratings) async {
     if (_uid.isEmpty) return;
 
+    final completedAt = DateTime.now();
+    final durationSeconds = completedAt.difference(state.startedAt).inSeconds;
+
     try {
-      // Load existing schedules for all reviewed cards
+      // ── 1. Apply SM-2 and save card schedules ────────────────────────────
       final existing = await FirestoreService.instance
           .getAllSchedules(_uid, _args.chapterId);
       final scheduleMap = {for (final s in existing) s.cardId: s};
 
-      // Apply SM-2 to each card
       final updated = state.cards.map((card) {
         final schedule = scheduleMap[card.id] ??
             CardScheduleModel.newCard(
@@ -193,36 +195,61 @@ class SessionNotifier extends StateNotifier<SessionState> {
 
       await FirestoreService.instance.saveScheduleBatch(_uid, updated);
 
-      // Save review session summary
-      final total = ratings.length;
-      final correct =
-          ratings.values.where((r) => r == 'good' || r == 'easy').length;
+      // ── 2. Save review session document ─────────────────────────────────
+      final total   = ratings.length;
+      final correct = ratings.values.where((r) => r == 'good' || r == 'easy').length;
+      final topicName = '${_args.bookTitle} — ${_args.chapterName}';
 
       final session = ReviewSessionModel(
-        sessionId: '${_uid}_${DateTime.now().millisecondsSinceEpoch}',
-        topicId: _args.chapterId,
-        topicName: '${_args.bookTitle} — ${_args.chapterName}',
-        domainId: _args.domainId,
-        startedAt: state.startedAt,
-        completedAt: DateTime.now(),
-        durationSeconds:
-            DateTime.now().difference(state.startedAt).inSeconds,
-        cardsReviewed: total,
-        correctCount: correct,
-        incorrectCount: total - correct,
-        accuracy: total > 0 ? correct / total : 0.0,
+        sessionId:       '${_uid}_${completedAt.millisecondsSinceEpoch}',
+        topicId:         _args.chapterId,
+        topicName:       topicName,
+        domainId:        _args.domainId,
+        startedAt:       state.startedAt,
+        completedAt:     completedAt,
+        durationSeconds: durationSeconds,
+        cardsReviewed:   total,
+        correctCount:    correct,
+        incorrectCount:  total - correct,
+        accuracy:        total > 0 ? correct / total : 0.0,
         ratings: {
           'again': ratings.values.where((r) => r == 'again').length,
-          'hard': ratings.values.where((r) => r == 'hard').length,
-          'good': ratings.values.where((r) => r == 'good').length,
-          'easy': ratings.values.where((r) => r == 'easy').length,
+          'hard':  ratings.values.where((r) => r == 'hard').length,
+          'good':  ratings.values.where((r) => r == 'good').length,
+          'easy':  ratings.values.where((r) => r == 'easy').length,
         },
         xpEarned: state.xpEarned,
       );
 
       await FirestoreService.instance.saveSession(_uid, session);
-    } catch (_) {
-      // Silently fail — don't disrupt the result screen for persistence errors
+
+      // ── 3. Update per-topic progress ─────────────────────────────────────
+      await FirestoreService.instance.updateTopicProgress(
+        uid:              _uid,
+        topicId:          _args.chapterId,
+        topicName:        topicName,
+        domainId:         _args.domainId,
+        cardsReviewed:    total,
+        correctCount:     correct,
+        durationSeconds:  durationSeconds,
+        updatedSchedules: updated,
+      );
+
+      // ── 4. Update global user stats & streak ─────────────────────────────
+      await FirestoreService.instance.updateUserStats(
+        uid:             _uid,
+        cardsReviewed:   total,
+        sessionAccuracy: total > 0 ? correct / total : 0.0,
+        durationSeconds: durationSeconds,
+      );
+    } catch (e) {
+      // Silently fail — don't disrupt the result screen for persistence errors.
+      // Errors are logged to the console in debug mode.
+      assert(() {
+        // ignore: avoid_print
+        print('[SessionNotifier] _persistSession error: $e');
+        return true;
+      }());
     }
   }
 }

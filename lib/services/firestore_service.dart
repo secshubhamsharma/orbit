@@ -273,15 +273,17 @@ class FirestoreService {
     return results;
   }
 
-  /// Returns cards-reviewed counts for each of the last [days] days.
-  /// Index 0 = oldest day, index [days-1] = today.
+  /// Returns cards-reviewed counts indexed by ISO weekday (0 = Mon … 6 = Sun)
+  /// for the **current calendar week**. Matches the Mon-Sun bar chart labels.
   Future<List<int>> getWeeklyActivity(String uid, {int days = 7}) async {
     final now = DateTime.now();
-    final since = DateTime(now.year, now.month, now.day)
-        .subtract(Duration(days: days - 1));
-    // Fetch without orderBy to avoid requiring an index on startedAt alone.
+    // Monday of the current ISO week
+    final monday = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: now.weekday - 1));
+
     final snap = await _sessions(uid).get();
     final counts = List<int>.filled(days, 0);
+
     for (final d in snap.docs) {
       try {
         final data = _clean(d.data());
@@ -289,13 +291,45 @@ class FirestoreService {
         DateTime? dt;
         if (raw is String) dt = DateTime.tryParse(raw);
         if (dt == null) continue;
-        final dayIndex = dt.difference(since).inDays;
+        final dayIndex = DateTime(dt.year, dt.month, dt.day)
+            .difference(monday)
+            .inDays;
         if (dayIndex >= 0 && dayIndex < days) {
-          counts[dayIndex] += (data['cardsReviewed'] as num?)?.toInt() ?? 0;
+          counts[dayIndex] +=
+              (data['cardsReviewed'] as num?)?.toInt() ?? 0;
         }
       } catch (_) {}
     }
     return counts;
+  }
+
+  /// Returns a map of `"yyyy-MM-dd"` → cards-reviewed for the last [days] days.
+  /// Used to render the 5-week activity calendar on the progress screen.
+  Future<Map<String, int>> getActivityCalendar(
+      String uid, {int days = 35}) async {
+    final now = DateTime.now();
+    final cutoff = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: days - 1));
+
+    final snap = await _sessions(uid).get();
+    final result = <String, int>{};
+
+    for (final d in snap.docs) {
+      try {
+        final data = _clean(d.data());
+        final raw = data['startedAt'];
+        DateTime? dt;
+        if (raw is String) dt = DateTime.tryParse(raw);
+        if (dt == null) continue;
+        final day = DateTime(dt.year, dt.month, dt.day);
+        if (day.isBefore(cutoff)) continue;
+        final key =
+            '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
+        result[key] =
+            (result[key] ?? 0) + ((data['cardsReviewed'] as num?)?.toInt() ?? 0);
+      } catch (_) {}
+    }
+    return result;
   }
 
   // ---------------------------------------------------------------------------
@@ -315,6 +349,151 @@ class FirestoreService {
     await _userProgress(uid)
         .doc(progress.topicId)
         .set(progress.toJson(), SetOptions(merge: true));
+  }
+
+  /// Upserts per-topic progress after a review session completes.
+  ///
+  /// Runs inside a Firestore transaction so concurrent sessions can't corrupt
+  /// the running totals.
+  Future<void> updateTopicProgress({
+    required String uid,
+    required String topicId,
+    required String topicName,
+    required String domainId,
+    required int cardsReviewed,
+    required int correctCount,
+    required int durationSeconds,
+    required List<CardScheduleModel> updatedSchedules,
+  }) async {
+    final progressRef = _userProgress(uid).doc(topicId);
+    final now = DateTime.now();
+
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(progressRef);
+
+      int prevSessions = 0;
+      int prevCards    = 0;
+      int prevCorrect  = 0;
+      int prevIncorrect = 0;
+      int prevMinutes  = 0;
+      DateTime? firstStudied;
+
+      if (snap.exists && snap.data() != null) {
+        final d = _clean(snap.data()!);
+        prevSessions  = (d['totalSessions']      as num?)?.toInt() ?? 0;
+        prevCards     = (d['totalCardsReviewed'] as num?)?.toInt() ?? 0;
+        prevCorrect   = (d['totalCorrect']       as num?)?.toInt() ?? 0;
+        prevIncorrect = (d['totalIncorrect']     as num?)?.toInt() ?? 0;
+        prevMinutes   = (d['totalStudyMinutes']  as num?)?.toInt() ?? 0;
+        final fs = d['firstStudied'];
+        if (fs is String) firstStudied = DateTime.tryParse(fs);
+      }
+
+      final newCards     = prevCards + cardsReviewed;
+      final newCorrect   = prevCorrect + correctCount;
+      final newIncorrect = prevIncorrect + (cardsReviewed - correctCount);
+      final newAccuracy  = newCards > 0 ? newCorrect / newCards : 0.0;
+
+      // Mastery: cards whose SRS interval has reached ≥ 7 days
+      final masteredCount  = updatedSchedules.where((s) => s.interval >= 7).length;
+      final totalScheduled = updatedSchedules.length;
+      final masteryPct     = totalScheduled > 0
+          ? (masteredCount / totalScheduled) * 100
+          : 0.0;
+      final masteryLevel   = masteryPct >= 75
+          ? 'mastered'
+          : masteryPct >= 40
+              ? 'reviewing'
+              : 'learning';
+
+      tx.set(progressRef, {
+        'topicId':            topicId,
+        'topicName':          topicName,
+        'domainId':           domainId,
+        'firstStudied':       firstStudied?.toIso8601String() ?? now.toIso8601String(),
+        'lastStudied':        now.toIso8601String(),
+        'totalSessions':      prevSessions + 1,
+        'totalCardsReviewed': newCards,
+        'totalCorrect':       newCorrect,
+        'totalIncorrect':     newIncorrect,
+        'accuracy':           newAccuracy,
+        'masteryPercent':     masteryPct,
+        'masteryLevel':       masteryLevel,
+        'totalStudyMinutes':  prevMinutes + (durationSeconds / 60).round(),
+      }, SetOptions(merge: true));
+    });
+  }
+
+  /// Updates the global user-level stats and streak after a review session.
+  ///
+  /// Streak rules:
+  ///   - First session ever           → streak = 1
+  ///   - Last session was yesterday   → streak += 1
+  ///   - Last session was today       → streak unchanged
+  ///   - Last session was ≥ 2 days ago → streak = 1 (reset)
+  Future<void> updateUserStats({
+    required String uid,
+    required int cardsReviewed,
+    required double sessionAccuracy,
+    required int durationSeconds,
+  }) async {
+    final userRef = _users.doc(uid);
+    final now   = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(userRef);
+      final raw  = snap.exists && snap.data() != null
+          ? _clean(snap.data()!)
+          : <String, dynamic>{};
+
+      // ── Streak ─────────────────────────────────────────────────────────────
+      DateTime? lastDay;
+      final lastStudiedRaw = raw['lastStudiedDate'];
+      if (lastStudiedRaw is String) {
+        final dt = DateTime.tryParse(lastStudiedRaw);
+        if (dt != null) lastDay = DateTime(dt.year, dt.month, dt.day);
+      }
+
+      int currentStreak = (raw['currentStreak'] as num?)?.toInt() ?? 0;
+      int longestStreak = (raw['longestStreak'] as num?)?.toInt() ?? 0;
+
+      if (lastDay == null) {
+        currentStreak = 1; // very first session
+      } else {
+        final diff = today.difference(lastDay).inDays;
+        if (diff == 0) {
+          // already studied today — keep streak
+        } else if (diff == 1) {
+          currentStreak += 1; // consecutive day
+        } else {
+          currentStreak = 1; // broke the streak
+        }
+      }
+      if (currentStreak > longestStreak) longestStreak = currentStreak;
+
+      // ── Running weighted accuracy ──────────────────────────────────────────
+      final prevTotal    = (raw['totalCardsReviewed']   as num?)?.toInt()    ?? 0;
+      final prevAccuracy = (raw['overallAccuracy']      as num?)?.toDouble() ?? 0.0;
+      final prevMinutes  = (raw['totalStudyMinutes']    as num?)?.toInt()    ?? 0;
+      final prevWeekly   = (raw['weeklyCardsReviewed']  as num?)?.toInt()    ?? 0;
+
+      final newTotal    = prevTotal + cardsReviewed;
+      final newAccuracy = newTotal > 0
+          ? (prevAccuracy * prevTotal + sessionAccuracy * cardsReviewed) / newTotal
+          : 0.0;
+
+      tx.set(userRef, {
+        'totalCardsReviewed':  newTotal,
+        'weeklyCardsReviewed': prevWeekly + cardsReviewed,
+        'overallAccuracy':     newAccuracy,
+        'totalStudyMinutes':   prevMinutes + (durationSeconds / 60).round(),
+        'currentStreak':       currentStreak,
+        'longestStreak':       longestStreak,
+        'lastStudiedDate':     today.toIso8601String(),
+        'lastActiveAt':        now.toIso8601String(),
+      }, SetOptions(merge: true));
+    });
   }
 
   Future<List<ProgressModel>> getAllProgress(String uid) async {
