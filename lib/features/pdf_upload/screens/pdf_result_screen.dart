@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,8 +10,10 @@ import 'package:orbitapp/core/constants/app_colors.dart';
 import 'package:orbitapp/core/constants/app_spacing.dart';
 import 'package:orbitapp/core/constants/app_text_styles.dart';
 import 'package:orbitapp/models/flashcard_model.dart';
+import 'package:orbitapp/models/review_session_model.dart';
 import 'package:orbitapp/providers/pdf_upload_provider.dart';
 import 'package:orbitapp/providers/quiz_progress_provider.dart';
+import 'package:orbitapp/services/firestore_service.dart';
 
 // ─── Answer record ────────────────────────────────────────────────────────────
 
@@ -118,6 +121,7 @@ class _QuizSessionState extends ConsumerState<_QuizSession>
   int? _chosenIndex;
   bool _isAnswered = false;
   bool _showResults = false;
+  late final DateTime _startedAt;
 
   final List<_Answer> _answers = [];
 
@@ -132,6 +136,7 @@ class _QuizSessionState extends ConsumerState<_QuizSession>
   @override
   void initState() {
     super.initState();
+    _startedAt = DateTime.now();
 
     _cardCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 280));
@@ -218,14 +223,84 @@ class _QuizSessionState extends ConsumerState<_QuizSession>
   }
 
   void _finish() {
+    final total        = _answers.length;
     final correctCount = _answers.where((a) => a.correct).length;
+
+    // 1. Update in-memory provider (used by PDF preview screen cards badge)
     ref.read(chapterProgressProvider.notifier).save(
-      uploadId: widget.uploadId,
-      chapterId: widget.chapterId,
-      totalCards: _answers.length,
+      uploadId:     widget.uploadId,
+      chapterId:    widget.chapterId,
+      totalCards:   total,
       correctCount: correctCount,
     );
+
+    // 2. Persist to Firestore (fire-and-forget so UI isn't blocked)
+    _persistToFirestore(total: total, correctCount: correctCount);
+
     setState(() => _showResults = true);
+  }
+
+  Future<void> _persistToFirestore({
+    required int total,
+    required int correctCount,
+  }) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty || total == 0) return;
+
+    final completedAt     = DateTime.now();
+    final durationSeconds = completedAt.difference(_startedAt).inSeconds;
+    final accuracy        = correctCount / total;
+
+    try {
+      // ── Save session history ─────────────────────────────────────────────
+      final session = ReviewSessionModel(
+        sessionId:       '${uid}_${completedAt.millisecondsSinceEpoch}',
+        topicId:         widget.chapterId,
+        topicName:       widget.chapterTitle,
+        domainId:        'uploads',
+        startedAt:       _startedAt,
+        completedAt:     completedAt,
+        durationSeconds: durationSeconds,
+        cardsReviewed:   total,
+        correctCount:    correctCount,
+        incorrectCount:  total - correctCount,
+        accuracy:        accuracy,
+        ratings: {
+          'again': total - correctCount,
+          'hard':  0,
+          'good':  correctCount,
+          'easy':  0,
+        },
+        xpEarned: correctCount * 2 + 10,
+      );
+      await FirestoreService.instance.saveSession(uid, session);
+
+      // ── Update topic progress ────────────────────────────────────────────
+      await FirestoreService.instance.updateTopicProgress(
+        uid:             uid,
+        topicId:         widget.chapterId,
+        topicName:       widget.chapterTitle,
+        domainId:        'uploads',
+        cardsReviewed:   total,
+        correctCount:    correctCount,
+        durationSeconds: durationSeconds,
+        // No SM-2 schedules for PDF quizzes; mastery derived from accuracy
+      );
+
+      // ── Update global user stats + streak ────────────────────────────────
+      await FirestoreService.instance.updateUserStats(
+        uid:             uid,
+        cardsReviewed:   total,
+        sessionAccuracy: accuracy,
+        durationSeconds: durationSeconds,
+      );
+    } catch (e) {
+      assert(() {
+        // ignore: avoid_print
+        print('[PdfResultScreen] _persistToFirestore error: $e');
+        return true;
+      }());
+    }
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────────

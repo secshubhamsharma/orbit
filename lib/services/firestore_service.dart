@@ -363,7 +363,7 @@ class FirestoreService {
     required int cardsReviewed,
     required int correctCount,
     required int durationSeconds,
-    required List<CardScheduleModel> updatedSchedules,
+    List<CardScheduleModel> updatedSchedules = const [],
   }) async {
     final progressRef = _userProgress(uid).doc(topicId);
     final now = DateTime.now();
@@ -371,20 +371,24 @@ class FirestoreService {
     await _db.runTransaction((tx) async {
       final snap = await tx.get(progressRef);
 
-      int prevSessions = 0;
-      int prevCards    = 0;
-      int prevCorrect  = 0;
+      int prevSessions  = 0;
+      int prevCards     = 0;
+      int prevCorrect   = 0;
       int prevIncorrect = 0;
-      int prevMinutes  = 0;
+      int prevMinutes   = 0;
+      double prevMastery = 0.0;
+      String prevMasteryLevel = 'learning';
       DateTime? firstStudied;
 
       if (snap.exists && snap.data() != null) {
         final d = _clean(snap.data()!);
-        prevSessions  = (d['totalSessions']      as num?)?.toInt() ?? 0;
-        prevCards     = (d['totalCardsReviewed'] as num?)?.toInt() ?? 0;
-        prevCorrect   = (d['totalCorrect']       as num?)?.toInt() ?? 0;
-        prevIncorrect = (d['totalIncorrect']     as num?)?.toInt() ?? 0;
-        prevMinutes   = (d['totalStudyMinutes']  as num?)?.toInt() ?? 0;
+        prevSessions      = (d['totalSessions']      as num?)?.toInt() ?? 0;
+        prevCards         = (d['totalCardsReviewed'] as num?)?.toInt() ?? 0;
+        prevCorrect       = (d['totalCorrect']       as num?)?.toInt() ?? 0;
+        prevIncorrect     = (d['totalIncorrect']     as num?)?.toInt() ?? 0;
+        prevMinutes       = (d['totalStudyMinutes']  as num?)?.toInt() ?? 0;
+        prevMastery       = (d['masteryPercent']     as num?)?.toDouble() ?? 0.0;
+        prevMasteryLevel  = (d['masteryLevel']       as String?) ?? 'learning';
         final fs = d['firstStudied'];
         if (fs is String) firstStudied = DateTime.tryParse(fs);
       }
@@ -394,17 +398,26 @@ class FirestoreService {
       final newIncorrect = prevIncorrect + (cardsReviewed - correctCount);
       final newAccuracy  = newCards > 0 ? newCorrect / newCards : 0.0;
 
-      // Mastery: cards whose SRS interval has reached ≥ 7 days
-      final masteredCount  = updatedSchedules.where((s) => s.interval >= 7).length;
-      final totalScheduled = updatedSchedules.length;
-      final masteryPct     = totalScheduled > 0
-          ? (masteredCount / totalScheduled) * 100
-          : 0.0;
-      final masteryLevel   = masteryPct >= 75
-          ? 'mastered'
-          : masteryPct >= 40
-              ? 'reviewing'
-              : 'learning';
+      // Mastery: cards whose SRS interval has reached ≥ 7 days.
+      // If no SM-2 schedules are provided (e.g. PDF quiz), keep the existing value.
+      double masteryPct;
+      String masteryLevel;
+      if (updatedSchedules.isNotEmpty) {
+        final masteredCount  = updatedSchedules.where((s) => s.interval >= 7).length;
+        masteryPct = (masteredCount / updatedSchedules.length) * 100;
+        masteryLevel = masteryPct >= 75
+            ? 'mastered'
+            : masteryPct >= 40
+                ? 'reviewing'
+                : 'learning';
+      } else {
+        // No SM-2 data: derive mastery from cumulative accuracy if first session,
+        // otherwise preserve whatever was already stored.
+        masteryPct   = prevCards == 0
+            ? (newAccuracy * 60).clamp(0, 100)  // rough bootstrap from accuracy
+            : prevMastery;
+        masteryLevel = prevMasteryLevel;
+      }
 
       tx.set(progressRef, {
         'topicId':            topicId,
@@ -505,6 +518,17 @@ class FirestoreService {
     }).toList();
   }
 
+  /// Real-time stream of all topic progress docs — auto-updates after each session.
+  Stream<List<ProgressModel>> allProgressStream(String uid) {
+    return _userProgress(uid).snapshots().map((snap) {
+      return snap.docs.map((d) {
+        final data = _clean(d.data());
+        data['topicId'] ??= d.id;
+        return ProgressModel.fromJson(data);
+      }).toList();
+    });
+  }
+
   Future<List<ProgressModel>> getWeakTopics(String uid,
       {int limit = 3}) async {
     final snap = await _userProgress(uid)
@@ -517,6 +541,20 @@ class FirestoreService {
       data['topicId'] ??= d.id;
       return ProgressModel.fromJson(data);
     }).toList();
+  }
+
+  /// Real-time stream of weak topics — auto-updates after each session.
+  Stream<List<ProgressModel>> weakTopicsStream(String uid, {int limit = 3}) {
+    return _userProgress(uid)
+        .where('accuracy', isLessThan: 0.70)
+        .orderBy('accuracy')
+        .limit(limit)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) {
+              final data = _clean(d.data());
+              data['topicId'] ??= d.id;
+              return ProgressModel.fromJson(data);
+            }).toList());
   }
 
   // ---------------------------------------------------------------------------
