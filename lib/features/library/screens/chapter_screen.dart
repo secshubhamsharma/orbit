@@ -404,7 +404,7 @@ class _StudyButton extends StatelessWidget {
                       color: Colors.white, size: 20),
                   const SizedBox(width: AppSpacing.sm),
                   Text(
-                    'Start Studying · ${chapter.totalCards} cards',
+                    'Start Studying · ${chapter.totalCards} questions',
                     style: AppTextStyles.labelLarge
                         .copyWith(color: Colors.white),
                   ),
@@ -427,7 +427,7 @@ class _StatsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        _StatBox(label: 'Total Cards', value: '${chapter.totalCards}'),
+        _StatBox(label: 'Questions', value: '${chapter.totalCards}'),
         const SizedBox(width: AppSpacing.sm),
         _StatBox(
             label: 'Est. Time', value: '${chapter.estimatedMinutes} min'),
