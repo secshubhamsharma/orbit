@@ -486,8 +486,11 @@ class FirestoreService {
     required int cardsReviewed,
     required double sessionAccuracy,
     required int durationSeconds,
+    String? displayName,  // used to keep leaderboard entry in sync
+    String? photoUrl,
   }) async {
-    final userRef = _users.doc(uid);
+    final userRef        = _users.doc(uid);
+    final leaderboardRef = _db.collection('leaderboard').doc(uid);
     final now   = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
@@ -513,26 +516,27 @@ class FirestoreService {
       } else {
         final diff = today.difference(lastDay).inDays;
         if (diff == 0) {
-          // already studied today — keep streak
+          // already studied today — keep streak unchanged
         } else if (diff == 1) {
           currentStreak += 1; // consecutive day
         } else {
-          currentStreak = 1; // broke the streak
+          currentStreak = 1; // streak broken
         }
       }
       if (currentStreak > longestStreak) longestStreak = currentStreak;
 
       // ── Running weighted accuracy ──────────────────────────────────────────
-      final prevTotal    = (raw['totalCardsReviewed']   as num?)?.toInt()    ?? 0;
-      final prevAccuracy = (raw['overallAccuracy']      as num?)?.toDouble() ?? 0.0;
-      final prevMinutes  = (raw['totalStudyMinutes']    as num?)?.toInt()    ?? 0;
-      final prevWeekly   = (raw['weeklyCardsReviewed']  as num?)?.toInt()    ?? 0;
+      final prevTotal    = (raw['totalCardsReviewed']  as num?)?.toInt()    ?? 0;
+      final prevAccuracy = (raw['overallAccuracy']     as num?)?.toDouble() ?? 0.0;
+      final prevMinutes  = (raw['totalStudyMinutes']   as num?)?.toInt()    ?? 0;
+      final prevWeekly   = (raw['weeklyCardsReviewed'] as num?)?.toInt()    ?? 0;
 
       final newTotal    = prevTotal + cardsReviewed;
       final newAccuracy = newTotal > 0
           ? (prevAccuracy * prevTotal + sessionAccuracy * cardsReviewed) / newTotal
           : 0.0;
 
+      // ── Write user document ────────────────────────────────────────────────
       tx.set(userRef, {
         'totalCardsReviewed':  newTotal,
         'weeklyCardsReviewed': prevWeekly + cardsReviewed,
@@ -543,7 +547,58 @@ class FirestoreService {
         'lastStudiedDate':     today.toIso8601String(),
         'lastActiveAt':        now.toIso8601String(),
       }, SetOptions(merge: true));
+
+      // ── Atomically mirror key stats to leaderboard/{uid} ──────────────────
+      // Score = totalCardsReviewed × overallAccuracy (rewards volume + quality).
+      if (displayName != null && displayName.isNotEmpty) {
+        tx.set(leaderboardRef, {
+          'userId':              uid,
+          'displayName':         displayName,
+          if (photoUrl != null) 'photoUrl': photoUrl,
+          'totalCardsReviewed':  newTotal,
+          'overallAccuracy':     newAccuracy,
+          'currentStreak':       currentStreak,
+          'score':               newTotal * newAccuracy,
+          'updatedAt':           now.toIso8601String(),
+        }, SetOptions(merge: true));
+      }
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Leaderboard helpers (new flat collection)
+  // ---------------------------------------------------------------------------
+
+  /// Real-time stream of top [limit] leaderboard entries ordered by score.
+  /// Rank is assigned client-side (1 = highest score).
+  Stream<List<LeaderboardEntryModel>> leaderboardStream({int limit = 50}) {
+    return _db
+        .collection('leaderboard')
+        .orderBy('score', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map((snap) {
+      final entries = <LeaderboardEntryModel>[];
+      for (int i = 0; i < snap.docs.length; i++) {
+        try {
+          final data = _clean(snap.docs[i].data());
+          data['userId'] ??= snap.docs[i].id;
+          data['rank']   = i + 1;
+          entries.add(LeaderboardEntryModel.fromJson(data));
+        } catch (_) {}
+      }
+      return entries;
+    });
+  }
+
+  /// One-time fetch of a single user's leaderboard entry.
+  Future<LeaderboardEntryModel?> getLeaderboardEntry(String userId) async {
+    final snap =
+        await _db.collection('leaderboard').doc(userId).get();
+    if (!snap.exists || snap.data() == null) return null;
+    final data = _clean(snap.data()!);
+    data['userId'] ??= userId;
+    return LeaderboardEntryModel.fromJson(data);
   }
 
   Future<List<ProgressModel>> getAllProgress(String uid) async {
@@ -831,31 +886,8 @@ class FirestoreService {
   // Leaderboard
   // ---------------------------------------------------------------------------
 
-  Future<List<LeaderboardEntryModel>> getWeeklyLeaderboard(
-      String weekId, {int limit = 50}) async {
-    final snap = await _db
-        .collection('leaderboard')
-        .doc('weekly')
-        .collection(weekId)
-        .orderBy('rank')
-        .limit(limit)
-        .get();
-    return snap.docs
-        .map((d) => LeaderboardEntryModel.fromJson(_clean(d.data())))
-        .toList();
-  }
-
-  Future<LeaderboardEntryModel?> getUserLeaderboardEntry(
-      String weekId, String userId) async {
-    final snap = await _db
-        .collection('leaderboard')
-        .doc('weekly')
-        .collection(weekId)
-        .doc(userId)
-        .get();
-    if (!snap.exists || snap.data() == null) return null;
-    return LeaderboardEntryModel.fromJson(_clean(snap.data()!));
-  }
+  // getWeeklyLeaderboard and getUserLeaderboardEntry removed —
+  // replaced by leaderboardStream and getLeaderboardEntry (flat collection).
 
   // ---------------------------------------------------------------------------
   // App Config

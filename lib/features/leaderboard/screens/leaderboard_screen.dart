@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,61 +9,16 @@ import 'package:orbitapp/core/constants/app_colors.dart';
 import 'package:orbitapp/core/constants/app_spacing.dart';
 import 'package:orbitapp/core/constants/app_text_styles.dart';
 import 'package:orbitapp/models/leaderboard_model.dart';
-import 'package:orbitapp/providers/auth_provider.dart';
 import 'package:orbitapp/services/firestore_service.dart';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-String _currentWeekId() {
-  final now = DateTime.now();
-  // ISO week number
-  final dayOfYear = now.difference(DateTime(now.year, 1, 1)).inDays + 1;
-  final weekNum =
-      ((dayOfYear - now.weekday + 10) / 7).floor();
-  return '${now.year}-W${weekNum.toString().padLeft(2, '0')}';
-}
-
-String _weekLabel() {
-  final now = DateTime.now();
-  final monday =
-      now.subtract(Duration(days: now.weekday - 1));
-  final sunday = monday.add(const Duration(days: 6));
-  final months = [
-    '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ];
-  return '${monday.day} ${months[monday.month]} – '
-      '${sunday.day} ${months[sunday.month]}';
-}
 
 // ---------------------------------------------------------------------------
 // Providers
 // ---------------------------------------------------------------------------
 
+/// Real-time top-50 leaderboard stream.
 final _leaderboardProvider =
-    FutureProvider<List<LeaderboardEntryModel>>((ref) async {
-  final weekId = _currentWeekId();
-  try {
-    return await FirestoreService.instance
-        .getWeeklyLeaderboard(weekId, limit: 50);
-  } catch (_) {
-    return [];
-  }
-});
-
-final _myEntryProvider =
-    FutureProvider<LeaderboardEntryModel?>((ref) async {
-  final user = ref.watch(currentUserProvider);
-  if (user == null) return null;
-  final weekId = _currentWeekId();
-  try {
-    return await FirestoreService.instance
-        .getUserLeaderboardEntry(weekId, user.uid);
-  } catch (_) {
-    return null;
-  }
+    StreamProvider<List<LeaderboardEntryModel>>((ref) {
+  return FirestoreService.instance.leaderboardStream(limit: 50);
 });
 
 // ---------------------------------------------------------------------------
@@ -73,221 +29,192 @@ class LeaderboardScreen extends ConsumerStatefulWidget {
   const LeaderboardScreen({super.key});
 
   @override
-  ConsumerState<LeaderboardScreen> createState() =>
-      _LeaderboardScreenState();
+  ConsumerState<LeaderboardScreen> createState() => _LeaderboardScreenState();
 }
 
 class _LeaderboardScreenState extends ConsumerState<LeaderboardScreen>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
+  late final AnimationController _entrance;
 
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(
+    _entrance = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1000),
+      duration: const Duration(milliseconds: 1100),
     )..forward();
   }
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    _entrance.dispose();
     super.dispose();
   }
 
-  Animation<double> _interval(double start, double end) =>
-      CurvedAnimation(
-        parent: _ctrl,
-        curve: Interval(start, end, curve: Curves.easeOutCubic),
+  Animation<double> _fade(double start, double end) => CurvedAnimation(
+        parent: _entrance,
+        curve: Interval(start, end, curve: Curves.easeOut),
+      );
+
+  Animation<Offset> _slide(double start, double end,
+          [Offset begin = const Offset(0, 0.15)]) =>
+      Tween<Offset>(begin: begin, end: Offset.zero).animate(
+        CurvedAnimation(
+            parent: _entrance,
+            curve: Interval(start, end, curve: Curves.easeOutCubic)),
       );
 
   @override
   Widget build(BuildContext context) {
-    final leaderboardAsync = ref.watch(_leaderboardProvider);
-    final myEntryAsync = ref.watch(_myEntryProvider);
-    final currentUser = ref.watch(currentUserProvider);
+    final leaderAsync = ref.watch(_leaderboardProvider);
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
 
     return Scaffold(
       backgroundColor: AppColors.kBackground,
-      body: leaderboardAsync.when(
-        loading: () => _buildLoading(),
-        error: (e, _) => _buildError(e.toString()),
+      body: leaderAsync.when(
+        loading: () => _buildShell(child: const _Shimmer()),
+        error: (e, _) => _buildShell(
+          child: _ErrorState(
+            onRetry: () => ref.invalidate(_leaderboardProvider),
+          ),
+        ),
         data: (entries) {
-          final myEntry = myEntryAsync.valueOrNull;
-          return _buildContent(
-            entries: entries,
-            myEntry: myEntry,
-            currentUid: currentUser?.uid,
+          if (entries.isEmpty) {
+            return _buildShell(child: const _EmptyState());
+          }
+
+          final myEntry  = entries.where((e) => e.userId == myUid).firstOrNull;
+          final top3     = entries.take(3).toList();
+          final rest     = entries.length > 3 ? entries.sublist(3) : <LeaderboardEntryModel>[];
+          final inTop50  = myEntry != null;
+
+          return CustomScrollView(
+            physics: const BouncingScrollPhysics(),
+            slivers: [
+              // ── Header ──────────────────────────────────────────────────
+              SliverToBoxAdapter(
+                child: FadeTransition(
+                  opacity: _fade(0.0, 0.35),
+                  child: const _Header(),
+                ),
+              ),
+
+              // ── My rank if NOT in top 50 ─────────────────────────────────
+              if (!inTop50)
+                SliverToBoxAdapter(
+                  child: FadeTransition(
+                    opacity: _fade(0.1, 0.45),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.lg),
+                      child: _NotRankedBanner(),
+                    ),
+                  ),
+                ),
+
+              // ── Podium ───────────────────────────────────────────────────
+              SliverToBoxAdapter(
+                child: SlideTransition(
+                  position: _slide(0.05, 0.55),
+                  child: FadeTransition(
+                    opacity: _fade(0.05, 0.55),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.lg),
+                      child: _Podium(top3: top3, myUid: myUid),
+                    ),
+                  ),
+                ),
+              ),
+
+              const SliverToBoxAdapter(
+                  child: SizedBox(height: AppSpacing.xl)),
+
+              // ── "Rankings" label ────────────────────────────────────────
+              if (rest.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: FadeTransition(
+                    opacity: _fade(0.35, 0.65),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.md),
+                      child: Row(
+                        children: [
+                          Text(
+                            'Rankings',
+                            style: AppTextStyles.headingSmall,
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: AppColors.kSurfaceVariant,
+                              borderRadius: BorderRadius.circular(
+                                  AppSpacing.radiusFull),
+                            ),
+                            child: Text(
+                              '${rest.length + 3} players',
+                              style: AppTextStyles.caption,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+              // ── List: 4th place onwards ──────────────────────────────────
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (ctx, i) {
+                    final entry = rest[i];
+                    final isMe  = entry.userId == myUid;
+                    return _AnimatedRow(
+                      index: i,
+                      ctrl:  _entrance,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.sm),
+                        child: _RankRow(entry: entry, isMe: isMe),
+                      ),
+                    );
+                  },
+                  childCount: rest.length,
+                ),
+              ),
+
+              // ── Sticky "You" banner at bottom ────────────────────────────
+              if (inTop50 && myEntry != null)
+                SliverToBoxAdapter(
+                  child: FadeTransition(
+                    opacity: _fade(0.5, 0.9),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.lg, AppSpacing.lg,
+                          AppSpacing.lg, AppSpacing.xxl),
+                      child: _MyRankBar(entry: myEntry),
+                    ),
+                  ),
+                ),
+
+              const SliverToBoxAdapter(
+                  child: SizedBox(height: AppSpacing.xl)),
+            ],
           );
         },
       ),
     );
   }
 
-  Widget _buildContent({
-    required List<LeaderboardEntryModel> entries,
-    required LeaderboardEntryModel? myEntry,
-    required String? currentUid,
-  }) {
-    final top3 = entries.take(3).toList();
-    final rest = entries.length > 3 ? entries.sublist(3) : <LeaderboardEntryModel>[];
-    final isInTop50 = entries.any((e) => e.userId == currentUid);
-
+  Widget _buildShell({required Widget child}) {
     return CustomScrollView(
       physics: const BouncingScrollPhysics(),
       slivers: [
-        // ── App Bar ──────────────────────────────────────────────────────────
-        SliverToBoxAdapter(
-          child: FadeTransition(
-            opacity: _interval(0.0, 0.4),
-            child: _Header(weekLabel: _weekLabel()),
-          ),
-        ),
-
-        // ── My Rank Banner (if not in visible top 50) ────────────────────────
-        if (myEntry != null && !isInTop50)
-          SliverToBoxAdapter(
-            child: FadeTransition(
-              opacity: _interval(0.1, 0.5),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.pagePadding, 0, AppSpacing.pagePadding, AppSpacing.lg),
-                child: _MyRankBanner(entry: myEntry),
-              ),
-            ),
-          ),
-
-        // ── Podium ───────────────────────────────────────────────────────────
-        if (top3.isNotEmpty)
-          SliverToBoxAdapter(
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 0.15),
-                end: Offset.zero,
-              ).animate(_interval(0.1, 0.6)),
-              child: FadeTransition(
-                opacity: _interval(0.1, 0.6),
-                child: _Podium(
-                  top3: top3,
-                  currentUid: currentUid,
-                ),
-              ),
-            ),
-          ),
-
-        // ── Section label ────────────────────────────────────────────────────
-        if (rest.isNotEmpty)
-          SliverToBoxAdapter(
-            child: FadeTransition(
-              opacity: _interval(0.4, 0.7),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.pagePadding, AppSpacing.xl,
-                    AppSpacing.pagePadding, AppSpacing.md),
-                child: Text(
-                  'Rankings',
-                  style: AppTextStyles.labelMedium
-                      .copyWith(color: AppColors.kTextSecondary),
-                ),
-              ),
-            ),
-          ),
-
-        // ── Rest of list ─────────────────────────────────────────────────────
-        SliverList(
-          delegate: SliverChildBuilderDelegate(
-            (context, i) {
-              final entry = rest[i];
-              final isMe = entry.userId == currentUid;
-              return _AnimatedItem(
-                index: i,
-                ctrl: _ctrl,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.pagePadding, 0,
-                      AppSpacing.pagePadding, AppSpacing.sm),
-                  child: _RankTile(
-                    entry: entry,
-                    isCurrentUser: isMe,
-                  ),
-                ),
-              );
-            },
-            childCount: rest.length,
-          ),
-        ),
-
-        // ── Current user at bottom if in top 50 ──────────────────────────────
-        if (myEntry != null && isInTop50 && currentUid != null)
-          SliverToBoxAdapter(
-            child: FadeTransition(
-              opacity: _interval(0.5, 0.9),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.pagePadding, AppSpacing.lg,
-                    AppSpacing.pagePadding, AppSpacing.xxl),
-                child: _MyRankBanner(entry: myEntry, compact: true),
-              ),
-            ),
-          ),
-
-        const SliverToBoxAdapter(
-          child: SizedBox(height: AppSpacing.huge),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLoading() {
-    return CustomScrollView(
-      slivers: [
-        SliverToBoxAdapter(
-          child: _Header(weekLabel: _weekLabel()),
-        ),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.pagePadding),
-            child: _Skeleton(),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildError(String msg) {
-    return CustomScrollView(
-      slivers: [
-        SliverToBoxAdapter(
-          child: _Header(weekLabel: _weekLabel()),
-        ),
+        const SliverToBoxAdapter(child: _Header()),
         SliverFillRemaining(
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.signal_wifi_off_rounded,
-                    size: 52, color: AppColors.kTextDisabled),
-                const SizedBox(height: AppSpacing.lg),
-                Text('Could not load leaderboard',
-                    style: AppTextStyles.headingSmall),
-                const SizedBox(height: AppSpacing.sm),
-                Text('Check your connection and try again',
-                    style: AppTextStyles.bodySmall),
-                const SizedBox(height: AppSpacing.xl),
-                FilledButton(
-                  onPressed: () =>
-                      ref.invalidate(_leaderboardProvider),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.kPrimary,
-                  ),
-                  child: Text('Retry',
-                      style: AppTextStyles.labelMedium
-                          .copyWith(color: Colors.white)),
-                ),
-              ],
-            ),
-          ),
+          hasScrollBody: false,
+          child: child,
         ),
       ],
     );
@@ -299,57 +226,74 @@ class _LeaderboardScreenState extends ConsumerState<LeaderboardScreen>
 // ---------------------------------------------------------------------------
 
 class _Header extends StatelessWidget {
-  const _Header({required this.weekLabel});
-  final String weekLabel;
+  const _Header();
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: EdgeInsets.only(
         top: MediaQuery.of(context).padding.top + AppSpacing.lg,
-        left: AppSpacing.pagePadding,
-        right: AppSpacing.pagePadding,
+        left: AppSpacing.lg,
+        right: AppSpacing.lg,
         bottom: AppSpacing.lg,
-      ),
-      decoration: const BoxDecoration(
-        color: AppColors.kBackground,
       ),
       child: Row(
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Leaderboard', style: AppTextStyles.headingLarge),
-              const SizedBox(height: 2),
-              Row(
-                children: [
-                  const Icon(Icons.calendar_today_rounded,
-                      size: 12, color: AppColors.kTextSecondary),
-                  const SizedBox(width: 4),
-                  Text(weekLabel,
-                      style: AppTextStyles.caption
-                          .copyWith(color: AppColors.kTextSecondary)),
-                ],
+          // Back button
+          GestureDetector(
+            onTap: () => Navigator.of(context).pop(),
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.kSurface,
+                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                border: Border.all(color: AppColors.kBorder),
               ),
-            ],
+              child: const Icon(Icons.arrow_back_rounded,
+                  size: 20, color: AppColors.kTextPrimary),
+            ),
           ),
-          const Spacer(),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Leaderboard', style: AppTextStyles.headingLarge),
+                const SizedBox(height: 2),
+                Text(
+                  'Top 50 • All-time rankings',
+                  style: AppTextStyles.caption
+                      .copyWith(color: AppColors.kTextSecondary),
+                ),
+              ],
+            ),
+          ),
+          // Live indicator
           Container(
             padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+                horizontal: AppSpacing.sm, vertical: 5),
             decoration: BoxDecoration(
-              color: AppColors.kSurface,
-              borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-              border: Border.all(color: AppColors.kBorder),
+              color: AppColors.kSuccess.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
+              border: Border.all(
+                  color: AppColors.kSuccess.withValues(alpha: 0.3)),
             ),
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.refresh_rounded,
-                    size: 14, color: AppColors.kTextSecondary),
-                const SizedBox(width: 4),
-                Text('Weekly',
-                    style: AppTextStyles.labelSmall
-                        .copyWith(color: AppColors.kTextSecondary)),
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: const BoxDecoration(
+                    color: AppColors.kSuccess,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Text('Live',
+                    style: AppTextStyles.caption
+                        .copyWith(color: AppColors.kSuccess)),
               ],
             ),
           ),
@@ -360,90 +304,80 @@ class _Header extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Podium
+// Podium (top 3)
 // ---------------------------------------------------------------------------
 
 class _Podium extends StatelessWidget {
-  const _Podium({required this.top3, required this.currentUid});
+  const _Podium({required this.top3, required this.myUid});
   final List<LeaderboardEntryModel> top3;
-  final String? currentUid;
+  final String? myUid;
 
   @override
   Widget build(BuildContext context) {
-    final first = top3.isNotEmpty ? top3[0] : null;
+    final first  = top3.isNotEmpty ? top3[0] : null;
     final second = top3.length > 1 ? top3[1] : null;
-    final third = top3.length > 2 ? top3[2] : null;
+    final third  = top3.length > 2 ? top3[2] : null;
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: AppSpacing.pagePadding),
       padding: const EdgeInsets.fromLTRB(
-          AppSpacing.lg, AppSpacing.xl, AppSpacing.lg, AppSpacing.xl),
+          AppSpacing.lg, AppSpacing.xl, AppSpacing.lg, AppSpacing.lg),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF1A1730), Color(0xFF12141F)],
+          colors: [Color(0xFF1C1260), Color(0xFF0D1230)],
         ),
         borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
-        border: Border.all(color: AppColors.kBorder),
+        border: Border.all(
+            color: AppColors.kPrimary.withValues(alpha: 0.2)),
       ),
       child: Column(
         children: [
-          // Crown row
+          // Podium avatars
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              // 2nd place
               Expanded(
                 child: _PodiumSlot(
                   entry: second,
                   position: 2,
-                  height: 90,
-                  isCurrentUser: second?.userId == currentUid,
+                  blockHeight: 80,
+                  isMe: second?.userId == myUid,
                 ),
               ),
               const SizedBox(width: AppSpacing.md),
-              // 1st place
               Expanded(
-                flex: 1,
                 child: _PodiumSlot(
                   entry: first,
                   position: 1,
-                  height: 120,
-                  isCurrentUser: first?.userId == currentUid,
+                  blockHeight: 112,
+                  isMe: first?.userId == myUid,
                 ),
               ),
               const SizedBox(width: AppSpacing.md),
-              // 3rd place
               Expanded(
                 child: _PodiumSlot(
                   entry: third,
                   position: 3,
-                  height: 70,
-                  isCurrentUser: third?.userId == currentUid,
+                  blockHeight: 60,
+                  isMe: third?.userId == myUid,
                 ),
               ),
             ],
           ),
           const SizedBox(height: AppSpacing.xl),
-          // Stats row
+          // Stats strip
           Row(
             children: [
               if (second != null)
-                Expanded(
-                  child: _PodiumStat(entry: second),
-                ),
-              if (second != null) const SizedBox(width: AppSpacing.md),
+                Expanded(child: _PodiumStat(entry: second)),
+              if (second != null) const SizedBox(width: AppSpacing.sm),
               if (first != null)
-                Expanded(
-                  child: _PodiumStat(entry: first, highlight: true),
-                ),
+                Expanded(child: _PodiumStat(entry: first, gold: true)),
               if (first != null && third != null)
-                const SizedBox(width: AppSpacing.md),
+                const SizedBox(width: AppSpacing.sm),
               if (third != null)
-                Expanded(
-                  child: _PodiumStat(entry: third),
-                ),
+                Expanded(child: _PodiumStat(entry: third)),
             ],
           ),
         ],
@@ -456,56 +390,54 @@ class _PodiumSlot extends StatelessWidget {
   const _PodiumSlot({
     required this.entry,
     required this.position,
-    required this.height,
-    required this.isCurrentUser,
+    required this.blockHeight,
+    required this.isMe,
   });
   final LeaderboardEntryModel? entry;
   final int position;
-  final double height;
-  final bool isCurrentUser;
+  final double blockHeight;
+  final bool isMe;
 
-  Color get _medalColor {
-    switch (position) {
-      case 1:
-        return const Color(0xFFFFD700);
-      case 2:
-        return const Color(0xFFB0BEC5);
-      default:
-        return const Color(0xFFCD7F32);
-    }
-  }
+  Color get _medal => switch (position) {
+        1 => const Color(0xFFFFD700),
+        2 => const Color(0xFFB0BEC5),
+        _ => const Color(0xFFCD7F32),
+      };
+
+  String get _posEmoji => switch (position) {
+        1 => '👑',
+        2 => '🥈',
+        _ => '🥉',
+      };
 
   @override
   Widget build(BuildContext context) {
     if (entry == null) return const SizedBox();
-    final name = entry!.displayName;
-    final initials =
-        name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase();
+    final name     = entry!.displayName;
+    final initials = name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase();
+    final avatarSz = position == 1 ? 68.0 : 52.0;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Medal
-        if (position == 1)
-          Icon(Icons.workspace_premium_rounded,
-              size: 20, color: _medalColor),
-        if (position != 1) const SizedBox(height: 20),
-        const SizedBox(height: 4),
-        // Avatar
+        // Crown / medal emoji
+        Text(_posEmoji,
+            style: TextStyle(fontSize: position == 1 ? 22 : 16)),
+        const SizedBox(height: 6),
+
+        // Avatar with medal ring
         Stack(
           clipBehavior: Clip.none,
           alignment: Alignment.center,
           children: [
             Container(
-              width: position == 1 ? 72 : 56,
-              height: position == 1 ? 72 : 56,
+              width: avatarSz,
+              height: avatarSz,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: isCurrentUser
-                      ? AppColors.kPrimary
-                      : _medalColor.withOpacity(0.6),
-                  width: isCurrentUser ? 2.5 : 2,
+                  color: isMe ? AppColors.kPrimary : _medal,
+                  width: isMe ? 2.5 : 2.0,
                 ),
                 color: AppColors.kSurfaceVariant,
               ),
@@ -517,30 +449,34 @@ class _PodiumSlot extends StatelessWidget {
                         fit: BoxFit.cover,
                         errorWidget: (_, __, ___) => Center(
                           child: Text(initials,
-                              style: AppTextStyles.labelLarge.copyWith(
-                                  color: AppColors.kTextPrimary,
-                                  fontSize: position == 1 ? 22 : 16)),
+                              style: TextStyle(
+                                fontSize: position == 1 ? 22 : 16,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.kTextPrimary,
+                              )),
                         ),
                       )
                     : Center(
                         child: Text(initials,
-                            style: AppTextStyles.labelLarge.copyWith(
-                                color: AppColors.kTextPrimary,
-                                fontSize: position == 1 ? 22 : 16)),
+                            style: TextStyle(
+                              fontSize: position == 1 ? 22 : 16,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.kTextPrimary,
+                            )),
                       ),
               ),
             ),
             // Rank badge
             Positioned(
-              bottom: -4,
+              bottom: -5,
               child: Container(
-                width: 20,
-                height: 20,
+                width: 22,
+                height: 22,
                 decoration: BoxDecoration(
-                  color: _medalColor,
+                  color: _medal,
                   shape: BoxShape.circle,
                   border: Border.all(
-                      color: AppColors.kBackground, width: 1.5),
+                      color: const Color(0xFF0D1230), width: 1.5),
                 ),
                 alignment: Alignment.center,
                 child: Text(
@@ -548,7 +484,7 @@ class _PodiumSlot extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w800,
-                    color: Colors.black,
+                    color: Colors.black87,
                   ),
                 ),
               ),
@@ -556,143 +492,180 @@ class _PodiumSlot extends StatelessWidget {
           ],
         ),
         const SizedBox(height: AppSpacing.md),
+
         // Name
         Text(
-          name.split(' ').first,
-          style: AppTextStyles.labelSmall
-              .copyWith(color: AppColors.kTextPrimary),
+          isMe ? 'You' : name.split(' ').first,
+          style: AppTextStyles.labelSmall.copyWith(
+            color: isMe ? AppColors.kPrimaryLight : AppColors.kTextPrimary,
+            fontWeight: FontWeight.w700,
+          ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           textAlign: TextAlign.center,
         ),
-        // Podium block
         const SizedBox(height: AppSpacing.sm),
+
+        // Podium block
         Container(
-          height: height.toDouble(),
+          height: blockHeight,
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                _medalColor.withOpacity(0.3),
-                _medalColor.withOpacity(0.08),
+                _medal.withValues(alpha: 0.30),
+                _medal.withValues(alpha: 0.07),
               ],
             ),
             borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(AppSpacing.radiusSm),
-              topRight: Radius.circular(AppSpacing.radiusSm),
+              topLeft: Radius.circular(6),
+              topRight: Radius.circular(6),
             ),
             border: Border(
-              top: BorderSide(color: _medalColor.withOpacity(0.5)),
-              left: BorderSide(color: _medalColor.withOpacity(0.2)),
-              right: BorderSide(color: _medalColor.withOpacity(0.2)),
+              top:   BorderSide(color: _medal.withValues(alpha: 0.5)),
+              left:  BorderSide(color: _medal.withValues(alpha: 0.2)),
+              right: BorderSide(color: _medal.withValues(alpha: 0.2)),
             ),
           ),
           alignment: Alignment.center,
-          child: Text(
-            '${entry!.weeklyCardsReviewed}',
-            style: AppTextStyles.headingSmall
-                .copyWith(color: _medalColor, fontSize: 14),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                _fmtCards(entry!.totalCardsReviewed),
+                style: AppTextStyles.labelLarge
+                    .copyWith(color: _medal, fontSize: 15),
+              ),
+              Text(
+                'cards',
+                style: AppTextStyles.caption
+                    .copyWith(color: _medal.withValues(alpha: 0.7), fontSize: 10),
+              ),
+            ],
           ),
         ),
       ],
     );
   }
+
+  String _fmtCards(int n) {
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}k';
+    return '$n';
+  }
 }
 
 class _PodiumStat extends StatelessWidget {
-  const _PodiumStat({required this.entry, this.highlight = false});
+  const _PodiumStat({required this.entry, this.gold = false});
   final LeaderboardEntryModel entry;
-  final bool highlight;
+  final bool gold;
 
   @override
   Widget build(BuildContext context) {
-    final acc = (entry.weeklyAccuracy * 100).round();
+    final acc   = (entry.overallAccuracy * 100).round();
+    final score = _fmtScore(entry.score);
+
     return Container(
       padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.sm, vertical: AppSpacing.sm),
       decoration: BoxDecoration(
-        color: highlight
-            ? AppColors.kPrimaryContainer
-            : AppColors.kSurfaceVariant,
+        color: gold
+            ? const Color(0xFFFFD700).withValues(alpha: 0.08)
+            : AppColors.kSurface.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-        border: highlight
-            ? Border.all(color: AppColors.kPrimary.withOpacity(0.3))
+        border: gold
+            ? Border.all(
+                color: const Color(0xFFFFD700).withValues(alpha: 0.25))
             : null,
       ),
       child: Column(
         children: [
-          Text('$acc%',
-              style: AppTextStyles.labelMedium.copyWith(
-                  color: highlight
-                      ? AppColors.kPrimaryLight
-                      : AppColors.kTextPrimary)),
+          Text(
+            '$acc%',
+            style: AppTextStyles.labelMedium.copyWith(
+                color: gold
+                    ? const Color(0xFFFFD700)
+                    : AppColors.kTextPrimary),
+          ),
           const SizedBox(height: 2),
-          Text('accuracy',
-              style: AppTextStyles.caption
-                  .copyWith(color: AppColors.kTextSecondary, fontSize: 10)),
+          Text(
+            '$score pts',
+            style: AppTextStyles.caption.copyWith(
+                color: AppColors.kTextSecondary, fontSize: 10),
+          ),
         ],
       ),
     );
   }
+
+  String _fmtScore(double s) {
+    if (s >= 1000) return '${(s / 1000).toStringAsFixed(1)}k';
+    return s.round().toString();
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Rank tile (4th place onwards)
+// Rank row (4th place onward)
 // ---------------------------------------------------------------------------
 
-class _RankTile extends StatelessWidget {
-  const _RankTile({required this.entry, required this.isCurrentUser});
+class _RankRow extends StatelessWidget {
+  const _RankRow({required this.entry, required this.isMe});
   final LeaderboardEntryModel entry;
-  final bool isCurrentUser;
+  final bool isMe;
 
   @override
   Widget build(BuildContext context) {
-    final name = entry.displayName;
-    final initials =
-        name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase();
-    final acc = (entry.weeklyAccuracy * 100).round();
+    final name     = entry.displayName;
+    final initials = name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase();
+    final acc      = (entry.overallAccuracy * 100).round();
+    final score    = _fmtScore(entry.score);
 
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
+      duration: const Duration(milliseconds: 250),
       padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+          horizontal: AppSpacing.md, vertical: AppSpacing.md),
       decoration: BoxDecoration(
-        color: isCurrentUser
+        color: isMe
             ? AppColors.kPrimaryContainer
             : AppColors.kSurface,
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         border: Border.all(
-          color: isCurrentUser
-              ? AppColors.kPrimary.withOpacity(0.4)
+          color: isMe
+              ? AppColors.kPrimary.withValues(alpha: 0.4)
               : AppColors.kBorder,
+          width: isMe ? 1.5 : 1.0,
         ),
       ),
       child: Row(
         children: [
           // Rank number
           SizedBox(
-            width: 32,
+            width: 34,
             child: Text(
               '#${entry.rank}',
               style: AppTextStyles.labelMedium.copyWith(
-                color: isCurrentUser
+                color: isMe
                     ? AppColors.kPrimaryLight
-                    : AppColors.kTextSecondary,
+                    : entry.rank <= 10
+                        ? AppColors.kAccent
+                        : AppColors.kTextSecondary,
+                fontWeight: entry.rank <= 10
+                    ? FontWeight.w700
+                    : FontWeight.w500,
               ),
             ),
           ),
-          const SizedBox(width: AppSpacing.md),
+          const SizedBox(width: AppSpacing.sm),
+
           // Avatar
           Container(
-            width: 40,
-            height: 40,
+            width: 42,
+            height: 42,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: AppColors.kSurfaceVariant,
-              border: isCurrentUser
-                  ? Border.all(
-                      color: AppColors.kPrimary, width: 1.5)
+              border: isMe
+                  ? Border.all(color: AppColors.kPrimary, width: 1.5)
                   : null,
             ),
             child: ClipOval(
@@ -714,225 +687,206 @@ class _RankTile extends StatelessWidget {
             ),
           ),
           const SizedBox(width: AppSpacing.md),
+
           // Name + streak
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        isCurrentUser ? '$name (You)' : name,
-                        style: AppTextStyles.labelMedium.copyWith(
-                          color: isCurrentUser
-                              ? AppColors.kPrimaryLight
-                              : AppColors.kTextPrimary,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
+                Text(
+                  isMe ? '${name.split(' ').first} (You)' : name,
+                  style: AppTextStyles.labelMedium.copyWith(
+                    color: isMe
+                        ? AppColors.kPrimaryLight
+                        : AppColors.kTextPrimary,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Row(
                   children: [
-                    Icon(Icons.local_fire_department_rounded,
-                        size: 11,
-                        color: AppColors.kWarning.withOpacity(0.8)),
-                    const SizedBox(width: 2),
-                    Text('${entry.currentStreak}d streak',
-                        style: AppTextStyles.caption
-                            .copyWith(fontSize: 11)),
+                    Icon(
+                      Icons.local_fire_department_rounded,
+                      size: 12,
+                      color: AppColors.kAccent.withValues(alpha: 0.8),
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      '${entry.currentStreak}d streak',
+                      style: AppTextStyles.caption
+                          .copyWith(fontSize: 11),
+                    ),
                   ],
                 ),
               ],
             ),
           ),
-          // Cards + accuracy
+
+          // Score + accuracy
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '${entry.weeklyCardsReviewed}',
+                '$score pts',
                 style: AppTextStyles.labelMedium.copyWith(
-                  color: isCurrentUser
+                  color: isMe
                       ? AppColors.kPrimaryLight
                       : AppColors.kTextPrimary,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-              const SizedBox(height: 2),
-              Text(
-                '$acc% acc',
-                style: AppTextStyles.caption.copyWith(fontSize: 11),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// My rank banner
-// ---------------------------------------------------------------------------
-
-class _MyRankBanner extends StatelessWidget {
-  const _MyRankBanner({required this.entry, this.compact = false});
-  final LeaderboardEntryModel entry;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final acc = (entry.weeklyAccuracy * 100).round();
-    final name = entry.displayName;
-    final initials =
-        name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase();
-
-    if (compact) {
-      return Container(
-        padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.lg, vertical: AppSpacing.md),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF2A2060), Color(0xFF1A1A40)],
-          ),
-          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-          border:
-              Border.all(color: AppColors.kPrimary.withOpacity(0.4)),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.person_rounded,
-                size: 16, color: AppColors.kPrimaryLight),
-            const SizedBox(width: AppSpacing.sm),
-            Text('Your rank',
-                style: AppTextStyles.bodyMedium
-                    .copyWith(color: AppColors.kPrimaryLight)),
-            const Spacer(),
-            Text('#${entry.rank}',
-                style: AppTextStyles.headingSmall
-                    .copyWith(color: AppColors.kPrimaryLight)),
-            const SizedBox(width: AppSpacing.md),
-            Text('${entry.weeklyCardsReviewed} cards',
-                style: AppTextStyles.bodySmall
-                    .copyWith(color: AppColors.kTextSecondary)),
-          ],
-        ),
-      );
-    }
-
-    // Full banner (not in top 50)
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF2A2060), Color(0xFF1A1A40)],
-        ),
-        borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-        border: Border.all(color: AppColors.kPrimary.withOpacity(0.4)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Your position',
-              style: AppTextStyles.labelSmall
-                  .copyWith(color: AppColors.kTextSecondary)),
-          const SizedBox(height: AppSpacing.md),
-          Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: AppColors.kPrimaryContainer,
-                  border:
-                      Border.all(color: AppColors.kPrimary, width: 1.5),
-                ),
-                child: ClipOval(
-                  child: entry.photoUrl != null &&
-                          entry.photoUrl!.isNotEmpty
-                      ? CachedNetworkImage(
-                          imageUrl: entry.photoUrl!,
-                          fit: BoxFit.cover,
-                          errorWidget: (_, __, ___) => Center(
-                            child: Text(initials,
-                                style: AppTextStyles.labelMedium.copyWith(
-                                    color: AppColors.kPrimaryLight)),
-                          ),
-                        )
-                      : Center(
-                          child: Text(initials,
-                              style: AppTextStyles.labelMedium.copyWith(
-                                  color: AppColors.kPrimaryLight)),
-                        ),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('$name (You)',
-                        style: AppTextStyles.labelLarge
-                            .copyWith(color: AppColors.kPrimaryLight),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        const Icon(Icons.local_fire_department_rounded,
-                            size: 12, color: AppColors.kWarning),
-                        const SizedBox(width: 3),
-                        Text('${entry.currentStreak}d streak',
-                            style: AppTextStyles.caption),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              // Rank badge
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
+              const SizedBox(height: 3),
+              Row(
                 children: [
-                  Text('#${entry.rank}',
-                      style: AppTextStyles.headingMedium
-                          .copyWith(color: AppColors.kPrimaryLight)),
-                  Text('rank',
-                      style: AppTextStyles.caption
-                          .copyWith(color: AppColors.kTextSecondary)),
+                  Text(
+                    '${entry.totalCardsReviewed} cards',
+                    style: AppTextStyles.caption
+                        .copyWith(fontSize: 11),
+                  ),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: _accColor(acc).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '$acc%',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: _accColor(acc),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.lg),
-          const Divider(color: AppColors.kBorder, height: 1),
-          const SizedBox(height: AppSpacing.lg),
-          Row(
-            children: [
-              _BannerStat(
-                icon: Icons.style_rounded,
-                label: 'Cards',
-                value: '${entry.weeklyCardsReviewed}',
-              ),
-              _VertDiv(),
-              _BannerStat(
-                icon: Icons.track_changes_rounded,
-                label: 'Accuracy',
-                value: '$acc%',
-              ),
-              _VertDiv(),
-              _BannerStat(
-                icon: Icons.local_fire_department_rounded,
-                label: 'Streak',
-                value: '${entry.currentStreak}d',
-              ),
-            ],
+        ],
+      ),
+    );
+  }
+
+  Color _accColor(int acc) {
+    if (acc >= 80) return AppColors.kSuccess;
+    if (acc >= 60) return AppColors.kWarning;
+    return AppColors.kError;
+  }
+
+  String _fmtScore(double s) {
+    if (s >= 1000) return '${(s / 1000).toStringAsFixed(1)}k';
+    return s.round().toString();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// My rank sticky banner (visible at bottom for ranked users)
+// ---------------------------------------------------------------------------
+
+class _MyRankBar extends StatelessWidget {
+  const _MyRankBar({required this.entry});
+  final LeaderboardEntryModel entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final acc   = (entry.overallAccuracy * 100).round();
+    final score = entry.score >= 1000
+        ? '${(entry.score / 1000).toStringAsFixed(1)}k'
+        : entry.score.round().toString();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF2A1F80), Color(0xFF121040)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(
+            color: AppColors.kPrimary.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.person_rounded,
+              size: 18, color: AppColors.kPrimaryLight),
+          const SizedBox(width: AppSpacing.sm),
+          Text(
+            'Your rank',
+            style: AppTextStyles.bodyMedium
+                .copyWith(color: AppColors.kPrimaryLight),
+          ),
+          const Spacer(),
+          Text(
+            '#${entry.rank}',
+            style: AppTextStyles.headingSmall
+                .copyWith(color: AppColors.kPrimaryLight),
+          ),
+          const SizedBox(width: AppSpacing.lg),
+          _Pip(label: '$score pts', icon: Icons.star_rounded),
+          const SizedBox(width: AppSpacing.md),
+          _Pip(label: '$acc%', icon: Icons.track_changes_rounded),
+        ],
+      ),
+    );
+  }
+}
+
+class _Pip extends StatelessWidget {
+  const _Pip({required this.label, required this.icon});
+  final String label;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 13, color: AppColors.kTextSecondary),
+        const SizedBox(width: 4),
+        Text(label,
+            style:
+                AppTextStyles.caption.copyWith(color: AppColors.kTextSecondary)),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Banner when user has no leaderboard entry yet
+// ---------------------------------------------------------------------------
+
+class _NotRankedBanner extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.kSurface,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.kBorder),
+      ),
+      child: Row(
+        children: [
+          const Text('🏁', style: TextStyle(fontSize: 24)),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('You\'re not ranked yet',
+                    style: AppTextStyles.labelMedium),
+                const SizedBox(height: 3),
+                Text(
+                  'Complete a quiz to get on the board!',
+                  style: AppTextStyles.caption
+                      .copyWith(color: AppColors.kTextSecondary),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -940,75 +894,31 @@ class _MyRankBanner extends StatelessWidget {
   }
 }
 
-class _BannerStat extends StatelessWidget {
-  const _BannerStat(
-      {required this.icon,
-      required this.label,
-      required this.value});
-  final IconData icon;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Column(
-        children: [
-          Icon(icon, size: 16, color: AppColors.kPrimaryLight),
-          const SizedBox(height: 4),
-          Text(value,
-              style: AppTextStyles.labelMedium
-                  .copyWith(color: AppColors.kTextPrimary)),
-          const SizedBox(height: 2),
-          Text(label,
-              style: AppTextStyles.caption
-                  .copyWith(color: AppColors.kTextSecondary, fontSize: 10)),
-        ],
-      ),
-    );
-  }
-}
-
-class _VertDiv extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 36,
-      color: AppColors.kBorder,
-    );
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Animated list item
+// Animated list row
 // ---------------------------------------------------------------------------
 
-class _AnimatedItem extends StatelessWidget {
-  const _AnimatedItem({
-    required this.index,
-    required this.ctrl,
-    required this.child,
-  });
+class _AnimatedRow extends StatelessWidget {
+  const _AnimatedRow(
+      {required this.index, required this.ctrl, required this.child});
   final int index;
   final AnimationController ctrl;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    final start = math.min(0.35 + index * 0.04, 0.85);
-    final end = math.min(start + 0.25, 1.0);
-    final anim = CurvedAnimation(
+    final start = math.min(0.35 + index * 0.035, 0.88);
+    final end   = math.min(start + 0.22, 1.0);
+    final anim  = CurvedAnimation(
       parent: ctrl,
       curve: Interval(start, end, curve: Curves.easeOutCubic),
     );
     return FadeTransition(
       opacity: anim,
       child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(0, 0.12),
-          end: Offset.zero,
-        ).animate(anim),
+        position:
+            Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero)
+                .animate(anim),
         child: child,
       ),
     );
@@ -1016,16 +926,92 @@ class _AnimatedItem extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Skeleton loader
+// Empty state
 // ---------------------------------------------------------------------------
 
-class _Skeleton extends StatefulWidget {
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
+
   @override
-  State<_Skeleton> createState() => _SkeletonState();
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xxl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('🏆', style: TextStyle(fontSize: 56)),
+            const SizedBox(height: AppSpacing.lg),
+            Text('No rankings yet', style: AppTextStyles.headingSmall),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Be the first! Complete a quiz to claim the #1 spot.',
+              style: AppTextStyles.bodyMedium
+                  .copyWith(color: AppColors.kTextSecondary),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-class _SkeletonState extends State<_Skeleton>
-    with SingleTickerProviderStateMixin {
+// ---------------------------------------------------------------------------
+// Error state
+// ---------------------------------------------------------------------------
+
+class _ErrorState extends StatelessWidget {
+  const _ErrorState({required this.onRetry});
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xxl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.signal_wifi_off_rounded,
+                size: 52, color: AppColors.kTextDisabled),
+            const SizedBox(height: AppSpacing.lg),
+            Text('Could not load leaderboard',
+                style: AppTextStyles.headingSmall),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Check your connection and try again.',
+              style: AppTextStyles.bodyMedium
+                  .copyWith(color: AppColors.kTextSecondary),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            FilledButton.icon(
+              onPressed: onRetry,
+              style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.kPrimary),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shimmer skeleton loader
+// ---------------------------------------------------------------------------
+
+class _Shimmer extends StatefulWidget {
+  const _Shimmer();
+
+  @override
+  State<_Shimmer> createState() => _ShimmerState();
+}
+
+class _ShimmerState extends State<_Shimmer> with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
 
   @override
@@ -1033,7 +1019,7 @@ class _SkeletonState extends State<_Skeleton>
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1200),
+      duration: const Duration(milliseconds: 1100),
     )..repeat(reverse: true);
   }
 
@@ -1048,37 +1034,40 @@ class _SkeletonState extends State<_Skeleton>
     return AnimatedBuilder(
       animation: _ctrl,
       builder: (_, __) {
-        final opacity = 0.3 + _ctrl.value * 0.3;
+        final opacity = 0.25 + _ctrl.value * 0.25;
         return Opacity(
           opacity: opacity,
-          child: Column(
-            children: [
-              // Podium skeleton
-              Container(
-                height: 260,
-                decoration: BoxDecoration(
-                  color: AppColors.kSurface,
-                  borderRadius:
-                      BorderRadius.circular(AppSpacing.radiusXl),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xl),
-              ...List.generate(
-                5,
-                (i) => Padding(
-                  padding:
-                      const EdgeInsets.only(bottom: AppSpacing.sm),
-                  child: Container(
-                    height: 64,
-                    decoration: BoxDecoration(
-                      color: AppColors.kSurface,
-                      borderRadius:
-                          BorderRadius.circular(AppSpacing.radiusMd),
-                    ),
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Podium skeleton
+                Container(
+                  height: 280,
+                  decoration: BoxDecoration(
+                    color: AppColors.kSurface,
+                    borderRadius:
+                        BorderRadius.circular(AppSpacing.radiusXl),
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: AppSpacing.xl),
+                // Row skeletons
+                ...List.generate(6, (i) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                    child: Container(
+                      height: 68,
+                      decoration: BoxDecoration(
+                        color: AppColors.kSurface,
+                        borderRadius:
+                            BorderRadius.circular(AppSpacing.radiusMd),
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
           ),
         );
       },

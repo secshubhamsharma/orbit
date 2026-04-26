@@ -235,12 +235,15 @@ class SessionNotifier extends StateNotifier<SessionState> {
         updatedSchedules: updated,
       );
 
-      // ── 4. Update global user stats & streak ─────────────────────────────
+      // ── 4. Update global user stats, streak & leaderboard ───────────────
+      final fbUser = FirebaseAuth.instance.currentUser;
       await FirestoreService.instance.updateUserStats(
         uid:             _uid,
         cardsReviewed:   total,
         sessionAccuracy: total > 0 ? correct / total : 0.0,
         durationSeconds: durationSeconds,
+        displayName:     fbUser?.displayName ?? '',
+        photoUrl:        fbUser?.photoURL,
       );
     } catch (e) {
       // Silently fail — don't disrupt the result screen for persistence errors.

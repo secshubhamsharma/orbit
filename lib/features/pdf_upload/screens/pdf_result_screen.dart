@@ -287,12 +287,15 @@ class _QuizSessionState extends ConsumerState<_QuizSession>
         // No SM-2 schedules for PDF quizzes; mastery derived from accuracy
       );
 
-      // ── Update global user stats + streak ────────────────────────────────
+      // ── Update global user stats, streak & leaderboard ──────────────────
+      final fbUser = FirebaseAuth.instance.currentUser;
       await FirestoreService.instance.updateUserStats(
         uid:             uid,
         cardsReviewed:   total,
         sessionAccuracy: accuracy,
         durationSeconds: durationSeconds,
+        displayName:     fbUser?.displayName ?? '',
+        photoUrl:        fbUser?.photoURL,
       );
     } catch (e) {
       assert(() {
