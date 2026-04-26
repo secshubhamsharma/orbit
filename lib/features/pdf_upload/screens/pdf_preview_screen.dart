@@ -884,7 +884,7 @@ class _NoChaptersView extends StatelessWidget {
                   borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                 ),
               ),
-              child: Text('Study All Cards',
+              child: Text('Practise All Questions',
                   style: AppTextStyles.labelLarge
                       .copyWith(color: Colors.white)),
             ),

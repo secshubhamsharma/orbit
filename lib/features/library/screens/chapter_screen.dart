@@ -311,7 +311,7 @@ class _ChapterBody extends StatelessWidget {
             child: TextButton(
               onPressed: isGenerating ? null : onRegenerate,
               child: Text(
-                'Regenerate cards',
+                'Regenerate questions',
                 style: AppTextStyles.bodySmall.copyWith(
                   color: AppColors.kTextSecondary,
                 ),

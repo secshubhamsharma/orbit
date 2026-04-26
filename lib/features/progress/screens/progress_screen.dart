@@ -237,10 +237,10 @@ class _StatsGrid extends StatelessWidget {
             Row(
               children: [
                 _StatCell(
-                  icon:  Icons.style_rounded,
+                  icon:  Icons.quiz_rounded,
                   color: AppColors.kPrimary,
                   value: user?.totalCardsReviewed ?? 0,
-                  label: 'Total Cards',
+                  label: 'MCQs Answered',
                 ),
                 _Divider(vertical: true),
                 _StatCell(

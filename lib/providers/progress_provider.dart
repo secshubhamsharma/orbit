@@ -37,15 +37,15 @@ final weakTopicsProvider = StreamProvider<List<ProgressModel>>((ref) {
   );
 });
 
-/// Progress document for a single topic, or `null` when the user has not yet
-/// studied that topic.
+/// Real-time stream of a single topic's progress, or `null` when the user
+/// has not yet studied that topic. Auto-updates after every session.
 ///
 /// Usage:
 /// ```dart
 /// ref.watch(topicProgressProvider((uid: user.uid, topicId: 't')))
 /// ```
 final topicProgressProvider =
-    FutureProvider.family<ProgressModel?, ({String uid, String topicId})>(
+    StreamProvider.family<ProgressModel?, ({String uid, String topicId})>(
   (_, args) =>
-      FirestoreService.instance.getTopicProgress(args.uid, args.topicId),
+      FirestoreService.instance.topicProgressStream(args.uid, args.topicId),
 );

@@ -216,7 +216,7 @@ class _StatsRow extends StatelessWidget {
         children: [
           _StatCell(value: '$streak', label: 'Streak'),
           _Divider(),
-          _StatCell(value: '$cards', label: 'Cards'),
+          _StatCell(value: '$cards', label: 'MCQs'),
           _Divider(),
           _StatCell(value: '${accuracy.round()}%', label: 'Accuracy'),
           _Divider(),

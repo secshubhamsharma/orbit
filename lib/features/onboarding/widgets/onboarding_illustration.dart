@@ -194,7 +194,7 @@ class _ReviewScene extends StatelessWidget {
           bottom: 24,
           left: 6,
           child: _Badge(
-            label: '30 cards',
+            label: '30 MCQs',
             icon: Icons.layers_rounded,
             color: AppColors.kPrimary,
           ),

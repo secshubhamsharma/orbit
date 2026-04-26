@@ -14,16 +14,15 @@ import 'package:orbitapp/providers/progress_provider.dart';
 import 'package:orbitapp/services/firestore_service.dart';
 
 // ---------------------------------------------------------------------------
-// Local providers
+// Local providers — both real-time streams so the screen updates live
 // ---------------------------------------------------------------------------
 
+/// Real-time stream of sessions for this topic (client-side filter).
 final _topicSessionsProvider =
-    FutureProvider.family<List<ReviewSessionModel>, String>((ref, topicId) async {
+    StreamProvider.family<List<ReviewSessionModel>, String>((ref, topicId) {
   final user = ref.watch(currentUserProvider);
-  if (user == null) return [];
-  final all =
-      await FirestoreService.instance.getSessions(user.uid, limit: 50);
-  return all.where((s) => s.topicId == topicId).toList();
+  if (user == null) return Stream.value([]);
+  return FirestoreService.instance.topicSessionsStream(user.uid, topicId);
 });
 
 // ---------------------------------------------------------------------------
@@ -101,22 +100,22 @@ class _Body extends StatelessWidget {
             child: _NoDataState(topicId: topicId),
           )
         else ...[
-          // ── Hero ring + stats ─────────────────────────────────────────
+          // ── Hero: accuracy ring + stat row ────────────────────────────
           SliverToBoxAdapter(
             child: _HeroSection(progress: progress!),
           ),
 
-          // ── Card status ──────────────────────────────────────────────
+          // ── MCQ Performance (replaces broken "Card status") ───────────
           SliverToBoxAdapter(
-            child: _CardStatus(progress: progress!),
+            child: _McqPerformance(progress: progress!),
           ),
 
-          // ── Rating breakdown ─────────────────────────────────────────
+          // ── Answer breakdown per-session ──────────────────────────────
           SliverToBoxAdapter(
             child: sessionsAsync.when(
               data: (sessions) => sessions.isEmpty
                   ? const SizedBox.shrink()
-                  : _RatingBreakdown(sessions: sessions),
+                  : _AnswerBreakdown(sessions: sessions),
               loading: () => const SizedBox.shrink(),
               error: (_, __) => const SizedBox.shrink(),
             ),
@@ -143,7 +142,7 @@ class _Body extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Hero section — big ring + key numbers
+// Hero section — accuracy ring + key numbers
 // ---------------------------------------------------------------------------
 
 class _HeroSection extends StatelessWidget {
@@ -152,8 +151,18 @@ class _HeroSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (levelColor, levelLabel, levelIcon) = _levelInfo(progress.masteryLevel);
-    final acc = (progress.accuracy * 100).round();
+    final (levelColor, levelLabel, levelIcon) =
+        _levelInfo(progress.masteryLevel);
+
+    // Ring and percentage show accuracy (0–100 %) so every session moves it.
+    final accuracy = progress.accuracy.clamp(0.0, 1.0);
+    final accPct   = (accuracy * 100).round();
+
+    // Format study time sensibly
+    final mins = progress.totalStudyMinutes;
+    final timeLabel = mins < 60
+        ? '${mins}m'
+        : '${mins ~/ 60}h ${mins % 60}m';
 
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.lg),
@@ -166,7 +175,7 @@ class _HeroSection extends StatelessWidget {
         ),
         child: Column(
           children: [
-            // Big mastery ring
+            // Accuracy ring
             SizedBox(
               width: 130,
               height: 130,
@@ -174,11 +183,12 @@ class _HeroSection extends StatelessWidget {
                 alignment: Alignment.center,
                 children: [
                   TweenAnimationBuilder<double>(
-                    tween: Tween(begin: 0, end: progress.masteryPercent / 100),
+                    tween: Tween(begin: 0, end: accuracy),
                     duration: const Duration(milliseconds: 1000),
                     curve: Curves.easeOutCubic,
                     builder: (_, v, __) => CustomPaint(
-                      painter: _BigRingPainter(progress: v, color: levelColor),
+                      painter:
+                          _BigRingPainter(progress: v, color: levelColor),
                       child: const SizedBox(width: 130, height: 130),
                     ),
                   ),
@@ -186,9 +196,7 @@ class _HeroSection extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       TweenAnimationBuilder<int>(
-                        tween: IntTween(
-                            begin: 0,
-                            end: progress.masteryPercent.round()),
+                        tween: IntTween(begin: 0, end: accPct),
                         duration: const Duration(milliseconds: 1000),
                         curve: Curves.easeOut,
                         builder: (_, v, __) => Text(
@@ -197,8 +205,7 @@ class _HeroSection extends StatelessWidget {
                               .copyWith(color: levelColor),
                         ),
                       ),
-                      Text('mastery',
-                          style: AppTextStyles.caption),
+                      Text('accuracy', style: AppTextStyles.caption),
                     ],
                   ),
                 ],
@@ -213,7 +220,8 @@ class _HeroSection extends StatelessWidget {
                   horizontal: AppSpacing.md, vertical: 6),
               decoration: BoxDecoration(
                 color: levelColor.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
+                borderRadius:
+                    BorderRadius.circular(AppSpacing.radiusFull),
                 border: Border.all(
                     color: levelColor.withValues(alpha: 0.3)),
               ),
@@ -231,34 +239,24 @@ class _HeroSection extends StatelessWidget {
 
             const SizedBox(height: AppSpacing.xl),
 
-            // Stat row
+            // Stat row — Questions / Sessions / Time
             Row(
               children: [
                 _MiniStat(
-                  label: 'Accuracy',
-                  value: '$acc%',
-                  color: acc >= 80
-                      ? AppColors.kSuccess
-                      : acc >= 60
-                          ? AppColors.kWarning
-                          : AppColors.kError,
+                  label: 'Questions',
+                  value: '${progress.totalCardsReviewed}',
+                  color: AppColors.kPrimary,
                 ),
                 _StatDivider(),
                 _MiniStat(
                   label: 'Sessions',
                   value: '${progress.totalSessions}',
-                  color: AppColors.kPrimary,
-                ),
-                _StatDivider(),
-                _MiniStat(
-                  label: 'Cards',
-                  value: '${progress.totalCardsReviewed}',
                   color: AppColors.kSecondary,
                 ),
                 _StatDivider(),
                 _MiniStat(
-                  label: 'Minutes',
-                  value: '${progress.totalStudyMinutes}',
+                  label: 'Study time',
+                  value: mins == 0 ? '<1m' : timeLabel,
                   color: AppColors.kAccent,
                 ),
               ],
@@ -271,9 +269,9 @@ class _HeroSection extends StatelessWidget {
 
   (Color, String, IconData) _levelInfo(String level) {
     return switch (level) {
-      'mastered' => (AppColors.kSuccess, 'Mastered', Icons.verified_rounded),
+      'mastered'  => (AppColors.kSuccess, 'Mastered',  Icons.verified_rounded),
       'reviewing' => (AppColors.kPrimary, 'Reviewing', Icons.refresh_rounded),
-      _ => (AppColors.kWarning, 'Learning', Icons.school_outlined),
+      _           => (AppColors.kWarning, 'Learning',  Icons.school_outlined),
     };
   }
 }
@@ -310,8 +308,8 @@ class _BigRingPainter extends CustomPainter {
             colors: [color.withValues(alpha: 0.5), color],
             startAngle: -math.pi / 2,
             endAngle: -math.pi / 2 + 2 * math.pi * progress,
-          ).createShader(Rect.fromCircle(
-              center: Offset(cx, cy), radius: radius))
+          ).createShader(
+              Rect.fromCircle(center: Offset(cx, cy), radius: radius))
           ..style = PaintingStyle.stroke
           ..strokeWidth = strokeW
           ..strokeCap = StrokeCap.round,
@@ -339,7 +337,7 @@ class _MiniStat extends StatelessWidget {
           Text(value,
               style: AppTextStyles.headingSmall.copyWith(color: color)),
           const SizedBox(height: 2),
-          Text(label, style: AppTextStyles.caption),
+          Text(label, style: AppTextStyles.caption, textAlign: TextAlign.center),
         ],
       ),
     );
@@ -353,60 +351,134 @@ class _StatDivider extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Card status
+// MCQ Performance — replaces the broken "Card status" section
+// Shows real, always-populated data: total answered, correct, wrong
 // ---------------------------------------------------------------------------
 
-class _CardStatus extends StatelessWidget {
+class _McqPerformance extends StatelessWidget {
   final ProgressModel progress;
-  const _CardStatus({required this.progress});
+  const _McqPerformance({required this.progress});
 
   @override
   Widget build(BuildContext context) {
+    final total   = progress.totalCardsReviewed;
+    final correct = progress.totalCorrect;
+    final wrong   = progress.totalIncorrect;
+
+    // Overall accuracy bar
+    final accuracy = total > 0 ? correct / total : 0.0;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(
           AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Card status', style: AppTextStyles.headingSmall),
+          Text('MCQ Performance', style: AppTextStyles.headingSmall),
           const SizedBox(height: AppSpacing.md),
+          // Tiles
           Row(
             children: [
-              _CardStatusTile(
-                icon: Icons.fiber_new_rounded,
-                label: 'New',
-                count: progress.cardsNew,
-                color: AppColors.kTextSecondary,
+              _PerfTile(
+                icon: Icons.quiz_rounded,
+                label: 'Answered',
+                count: total,
+                color: AppColors.kPrimary,
               ),
               const SizedBox(width: AppSpacing.sm),
-              _CardStatusTile(
-                icon: Icons.pending_rounded,
-                label: 'Due',
-                count: progress.cardsDue,
-                color: AppColors.kWarning,
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              _CardStatusTile(
-                icon: Icons.verified_rounded,
-                label: 'Mastered',
-                count: progress.cardsMastered,
+              _PerfTile(
+                icon: Icons.check_circle_rounded,
+                label: 'Correct',
+                count: correct,
                 color: AppColors.kSuccess,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              _PerfTile(
+                icon: Icons.cancel_rounded,
+                label: 'Wrong',
+                count: wrong,
+                color: AppColors.kError,
               ),
             ],
           ),
+          if (total > 0) ...[
+            const SizedBox(height: AppSpacing.md),
+            // Overall accuracy bar
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppColors.kSurface,
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                border: Border.all(color: AppColors.kBorder),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Overall accuracy',
+                          style: AppTextStyles.bodyMedium.copyWith(
+                              fontWeight: FontWeight.w600)),
+                      Text(
+                        '${(accuracy * 100).round()}%',
+                        style: AppTextStyles.labelMedium.copyWith(
+                          color: accuracy >= 0.7
+                              ? AppColors.kSuccess
+                              : accuracy >= 0.5
+                                  ? AppColors.kWarning
+                                  : AppColors.kError,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  ClipRRect(
+                    borderRadius:
+                        BorderRadius.circular(AppSpacing.radiusFull),
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0, end: accuracy),
+                      duration: const Duration(milliseconds: 800),
+                      curve: Curves.easeOutCubic,
+                      builder: (_, v, __) => LinearProgressIndicator(
+                        value: v,
+                        minHeight: 8,
+                        backgroundColor:
+                            AppColors.kSurfaceVariant,
+                        valueColor: AlwaysStoppedAnimation(
+                          v >= 0.7
+                              ? AppColors.kSuccess
+                              : v >= 0.5
+                                  ? AppColors.kWarning
+                                  : AppColors.kError,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    'Improves as you retry and answer more questions correctly',
+                    style: AppTextStyles.caption
+                        .copyWith(color: AppColors.kTextDisabled),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 }
 
-class _CardStatusTile extends StatelessWidget {
+class _PerfTile extends StatelessWidget {
   final IconData icon;
   final String label;
   final int count;
   final Color color;
 
-  const _CardStatusTile({
+  const _PerfTile({
     required this.icon,
     required this.label,
     required this.count,
@@ -446,24 +518,29 @@ class _CardStatusTile extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Rating breakdown — horizontal stacked bar
+// Answer breakdown — Correct vs Wrong stacked bar (MCQ-appropriate)
+// Replaces the old Again/Hard/Good/Easy breakdown which doesn't apply to MCQ
 // ---------------------------------------------------------------------------
 
-class _RatingBreakdown extends StatelessWidget {
+class _AnswerBreakdown extends StatelessWidget {
   final List<ReviewSessionModel> sessions;
-  const _RatingBreakdown({required this.sessions});
+  const _AnswerBreakdown({required this.sessions});
 
   @override
   Widget build(BuildContext context) {
-    int again = 0, hard = 0, good = 0, easy = 0;
+    int totalCorrect = 0;
+    int totalWrong   = 0;
+
     for (final s in sessions) {
-      again += s.ratings['again'] ?? 0;
-      hard += s.ratings['hard'] ?? 0;
-      good += s.ratings['good'] ?? 0;
-      easy += s.ratings['easy'] ?? 0;
+      totalCorrect += s.correctCount;
+      totalWrong   += s.incorrectCount;
     }
-    final total = again + hard + good + easy;
+
+    final total = totalCorrect + totalWrong;
     if (total == 0) return const SizedBox.shrink();
+
+    final correctFrac = totalCorrect / total;
+    final wrongFrac   = totalWrong   / total;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -471,7 +548,7 @@ class _RatingBreakdown extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Rating breakdown', style: AppTextStyles.headingSmall),
+          Text('Answer breakdown', style: AppTextStyles.headingSmall),
           const SizedBox(height: AppSpacing.md),
           Container(
             padding: const EdgeInsets.all(AppSpacing.md),
@@ -482,7 +559,7 @@ class _RatingBreakdown extends StatelessWidget {
             ),
             child: Column(
               children: [
-                // Stacked bar
+                // Stacked bar: green | red
                 ClipRRect(
                   borderRadius:
                       BorderRadius.circular(AppSpacing.radiusFull),
@@ -494,18 +571,14 @@ class _RatingBreakdown extends StatelessWidget {
                       height: 10,
                       child: Row(
                         children: [
-                          _BarSegment(
-                              fraction: again / total * v,
-                              color: AppColors.kError),
-                          _BarSegment(
-                              fraction: hard / total * v,
-                              color: AppColors.kWarning),
-                          _BarSegment(
-                              fraction: good / total * v,
-                              color: AppColors.kPrimary),
-                          _BarSegment(
-                              fraction: easy / total * v,
-                              color: AppColors.kSuccess),
+                          Flexible(
+                            flex: (correctFrac * 1000 * v).round(),
+                            child: Container(color: AppColors.kSuccess),
+                          ),
+                          Flexible(
+                            flex: (wrongFrac * 1000 * v).round(),
+                            child: Container(color: AppColors.kError),
+                          ),
                         ],
                       ),
                     ),
@@ -515,14 +588,16 @@ class _RatingBreakdown extends StatelessWidget {
                 // Legend
                 Row(
                   children: [
-                    _RatingLegend(label: 'Again', count: again,
-                        color: AppColors.kError),
-                    _RatingLegend(label: 'Hard', count: hard,
-                        color: AppColors.kWarning),
-                    _RatingLegend(label: 'Good', count: good,
-                        color: AppColors.kPrimary),
-                    _RatingLegend(label: 'Easy', count: easy,
-                        color: AppColors.kSuccess),
+                    _BreakdownLegend(
+                      label: 'Correct',
+                      count: totalCorrect,
+                      color: AppColors.kSuccess,
+                    ),
+                    _BreakdownLegend(
+                      label: 'Wrong',
+                      count: totalWrong,
+                      color: AppColors.kError,
+                    ),
                   ],
                 ),
               ],
@@ -534,23 +609,11 @@ class _RatingBreakdown extends StatelessWidget {
   }
 }
 
-class _BarSegment extends StatelessWidget {
-  final double fraction;
-  final Color color;
-  const _BarSegment({required this.fraction, required this.color});
-
-  @override
-  Widget build(BuildContext context) => Flexible(
-        flex: (fraction * 1000).round(),
-        child: Container(color: color),
-      );
-}
-
-class _RatingLegend extends StatelessWidget {
+class _BreakdownLegend extends StatelessWidget {
   final String label;
   final int count;
   final Color color;
-  const _RatingLegend(
+  const _BreakdownLegend(
       {required this.label, required this.count, required this.color});
 
   @override
@@ -601,7 +664,8 @@ class _SessionHistory extends StatelessWidget {
             children: [
               Text('Session history', style: AppTextStyles.headingSmall),
               Text(
-                '${sessions.length} sessions',
+                '${sessions.length} '
+                '${sessions.length == 1 ? 'session' : 'sessions'}',
                 style: AppTextStyles.caption
                     .copyWith(color: AppColors.kPrimary),
               ),
@@ -636,7 +700,7 @@ class _SessionRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Timeline
+          // Timeline dot + line
           Column(
             children: [
               Container(
@@ -659,11 +723,11 @@ class _SessionRow extends StatelessWidget {
             ],
           ),
           const SizedBox(width: AppSpacing.md),
-          // Content
+          // Card
           Expanded(
             child: Padding(
-              padding: EdgeInsets.only(
-                  bottom: isLast ? 0 : AppSpacing.md),
+              padding:
+                  EdgeInsets.only(bottom: isLast ? 0 : AppSpacing.md),
               child: Container(
                 padding: const EdgeInsets.all(AppSpacing.md),
                 decoration: BoxDecoration(
@@ -687,7 +751,9 @@ class _SessionRow extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '${session.cardsReviewed} cards · ${_dur(session.durationSeconds)}',
+                            '${session.cardsReviewed} questions'
+                            ' · ${_dur(session.durationSeconds)}'
+                            ' · ${session.correctCount}✓ ${session.incorrectCount}✗',
                             style: AppTextStyles.caption,
                           ),
                         ],
@@ -703,8 +769,9 @@ class _SessionRow extends StatelessWidget {
                       ),
                       child: Text(
                         '$acc%',
-                        style: AppTextStyles.labelSmall
-                            .copyWith(color: accColor, fontWeight: FontWeight.w700),
+                        style: AppTextStyles.labelSmall.copyWith(
+                            color: accColor,
+                            fontWeight: FontWeight.w700),
                       ),
                     ),
                   ],
@@ -726,14 +793,18 @@ class _SessionRow extends StatelessWidget {
     }
     const m = [
       'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
-    return '${dt.day} ${m[dt.month - 1]}, ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    return '${dt.day} ${m[dt.month - 1]}, '
+        '${dt.hour.toString().padLeft(2, '0')}:'
+        '${dt.minute.toString().padLeft(2, '0')}';
   }
 
   String _dur(int s) {
     if (s < 60) return '${s}s';
-    return '${s ~/ 60}m';
+    final m = s ~/ 60;
+    final rem = s % 60;
+    return rem == 0 ? '${m}m' : '${m}m ${rem}s';
   }
 }
 
@@ -768,7 +839,7 @@ class _NoDataState extends StatelessWidget {
             Text('No data yet', style: AppTextStyles.headingSmall),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Review this topic to start tracking progress.',
+              'Answer some questions to start tracking your progress.',
               style: AppTextStyles.bodySmall,
               textAlign: TextAlign.center,
             ),

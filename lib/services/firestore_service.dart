@@ -365,6 +365,40 @@ class FirestoreService {
     return ProgressModel.fromJson(data);
   }
 
+  /// Real-time stream for a single topic's progress doc.
+  /// Emits `null` when the user has not yet studied this topic.
+  Stream<ProgressModel?> topicProgressStream(String uid, String topicId) {
+    return _userProgress(uid).doc(topicId).snapshots().map((snap) {
+      if (!snap.exists || snap.data() == null) return null;
+      final data = _clean(snap.data()!);
+      data['topicId'] ??= snap.id;
+      return ProgressModel.fromJson(data);
+    });
+  }
+
+  /// Real-time stream of sessions for a specific topic (client-side filter).
+  /// No composite index required.
+  Stream<List<ReviewSessionModel>> topicSessionsStream(
+      String uid, String topicId) {
+    return _sessions(uid)
+        .orderBy('startedAt', descending: true)
+        .limit(50)
+        .snapshots()
+        .map((snap) {
+      final results = <ReviewSessionModel>[];
+      for (final d in snap.docs) {
+        try {
+          final data = _clean(d.data());
+          data['sessionId'] ??= d.id;
+          data['topicId'] ??= '';
+          final session = ReviewSessionModel.fromJson(data);
+          if (session.topicId == topicId) results.add(session);
+        } catch (_) {}
+      }
+      return results;
+    });
+  }
+
   Future<void> saveTopicProgress(String uid, ProgressModel progress) async {
     await _userProgress(uid)
         .doc(progress.topicId)

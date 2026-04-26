@@ -108,7 +108,7 @@ class _SettingsBody extends ConsumerWidget {
             _Divider(),
             _TapTile(
               icon: Icons.sort_rounded,
-              label: 'Card order',
+              label: 'Question order',
               trailing: Text(
                 _cardOrderLabel(settings.defaultCardOrder),
                 style: AppTextStyles.bodyMedium
@@ -298,7 +298,7 @@ class _SettingsBody extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Card order', style: AppTextStyles.headingSmall),
+            Text('Question order', style: AppTextStyles.headingSmall),
             const SizedBox(height: AppSpacing.lg),
             ...options.map((o) => ListTile(
                   title: Text(o.$2, style: AppTextStyles.bodyMedium),
