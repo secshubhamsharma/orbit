@@ -425,19 +425,34 @@ class FirestoreService {
       final newAccuracy  = newCards > 0 ? newCorrect / newCards : 0.0;
 
       // Mastery: cards whose SRS interval has reached ≥ 7 days.
-      // If no SM-2 schedules are provided (e.g. PDF quiz), derive from accuracy.
+      // If no SM-2 schedules are provided (e.g. PDF quiz), derive from accuracy
+      // using a convergence formula so mastery improves with repeated sessions.
       double masteryPct;
+      int cardsDue      = 0;
+      int cardsMastered = 0;
       String masteryLevel;
+
       if (updatedSchedules.isNotEmpty) {
+        // SM-2 path (library topics)
+        final nowTs = DateTime.now();
+        cardsDue      = updatedSchedules.where((s) => !s.nextReviewDate.isAfter(nowTs)).length;
+        cardsMastered = updatedSchedules.where((s) => s.interval >= 21).length;
         final masteredCount = updatedSchedules.where((s) => s.interval >= 7).length;
         masteryPct = (masteredCount / updatedSchedules.length) * 100;
       } else {
-        // No SM-2 data: scale cumulative accuracy to a 0–100 mastery score.
-        // Cap at 70 so a perfect PDF quiz alone cannot show "mastered".
-        masteryPct = prevCards == 0
-            ? (newAccuracy * 70).clamp(0, 70)
-            : prevMastery;
+        // No SM-2 data (PDF quiz path): pull mastery toward session accuracy each time.
+        final sessionAcc = cardsReviewed > 0 ? correctCount / cardsReviewed : 0.0;
+        if (prevCards == 0) {
+          // First session — seed mastery from session accuracy, cap at 70
+          // so a single perfect attempt cannot instantly show "mastered".
+          masteryPct = (sessionAcc * 70).clamp(0.0, 70.0);
+        } else {
+          // Convergence: each session moves mastery 40% toward session performance.
+          masteryPct = prevMastery + (sessionAcc * 100 - prevMastery) * 0.4;
+          masteryPct = masteryPct.clamp(0.0, 95.0);
+        }
       }
+
       masteryLevel = masteryPct >= 75
           ? 'mastered'
           : masteryPct >= 40
@@ -459,6 +474,10 @@ class FirestoreService {
         'masteryPercent':     masteryPct,
         'masteryLevel':       masteryLevel,
         'totalStudyMinutes':  prevMinutes + (durationSeconds / 60).round(),
+        // Only write SRS-derived fields when schedules are available;
+        // merge:true preserves previously stored values for PDF-quiz topics.
+        if (updatedSchedules.isNotEmpty) 'cardsDue':      cardsDue,
+        if (updatedSchedules.isNotEmpty) 'cardsMastered': cardsMastered,
       }, SetOptions(merge: true));
 
       // ── Increment topicsStarted on user doc for brand-new topics ─────────

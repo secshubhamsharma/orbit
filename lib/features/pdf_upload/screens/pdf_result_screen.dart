@@ -125,6 +125,12 @@ class _QuizSessionState extends ConsumerState<_QuizSession>
 
   final List<_Answer> _answers = [];
 
+  // Pre-shuffled options and correct indices for every card.
+  // Computed once in initState — options are randomised per quiz session
+  // even for cards that already have a fixed correctOption in Firestore.
+  late final List<List<String>> _shuffledOptions;
+  late final List<int>          _shuffledCorrectIdx;
+
   late final AnimationController _cardCtrl;
   late final Animation<Offset> _cardSlide;
   late final Animation<double> _cardFade;
@@ -137,6 +143,7 @@ class _QuizSessionState extends ConsumerState<_QuizSession>
   void initState() {
     super.initState();
     _startedAt = DateTime.now();
+    _initShuffle();
 
     _cardCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 280));
@@ -161,25 +168,29 @@ class _QuizSessionState extends ConsumerState<_QuizSession>
     super.dispose();
   }
 
+  // ── Shuffle (called once in initState) ───────────────────────────────────────
+
+  void _initShuffle() {
+    _shuffledOptions    = [];
+    _shuffledCorrectIdx = [];
+    for (final card in widget.cards) {
+      final raw = card.options.isNotEmpty
+          ? card.options
+          : ['True', 'False', 'Cannot be determined', 'None of the above'];
+      final rawCorrect  = card.correctOption?.clamp(0, raw.length - 1) ?? 0;
+      final correctText = raw[rawCorrect];
+      final shuffled    = List<String>.from(raw)..shuffle();
+      _shuffledOptions.add(shuffled);
+      _shuffledCorrectIdx
+          .add(shuffled.indexOf(correctText).clamp(0, shuffled.length - 1));
+    }
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
-  FlashcardModel get _currentCard => widget.cards[_currentIndex];
-
-  /// Returns the 4 options for the current card.
-  List<String> get _options {
-    final card = _currentCard;
-    if (card.options.isNotEmpty) return card.options;
-    // Fallback for any legacy true_false stored in Firestore
-    return ['True', 'False', 'Cannot be determined', 'None of the above'];
-  }
-
-  /// Returns the correct answer index for the current card.
-  int get _correctIndex {
-    final card = _currentCard;
-    if (card.correctOption != null) return card.correctOption!;
-    // Fallback for legacy true_false
-    return card.back.trim().toLowerCase() == 'true' ? 0 : 1;
-  }
+  FlashcardModel   get _currentCard  => widget.cards[_currentIndex];
+  List<String>     get _options      => _shuffledOptions[_currentIndex];
+  int              get _correctIndex => _shuffledCorrectIdx[_currentIndex];
 
   // ── Interactions ─────────────────────────────────────────────────────────────
 

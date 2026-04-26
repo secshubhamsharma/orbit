@@ -240,13 +240,16 @@ function sanitizeCards(rawCards) {
     )
     .slice(0, CARDS_PER_CHAPTER_MAX)
     .map((c, index) => {
-      const correctOption =
-        typeof c.correctOption === 'number' ? c.correctOption : 0;
-      const options = c.options.map(String).slice(0, 4);
+      const rawCorrect    = typeof c.correctOption === 'number' ? c.correctOption : 0;
+      const rawOptions    = c.options.map(String).slice(0, 4);
+      const correctText   = rawOptions[rawCorrect] ?? rawOptions[0];
+      // Shuffle so the correct answer is not predictably in the same slot.
+      const options       = rawOptions.sort(() => Math.random() - 0.5);
+      const correctOption = Math.max(0, options.indexOf(correctText));
       return {
         type: 'mcq',
         front: String(c.front).trim(),
-        back: String(c.back ?? options[correctOption] ?? '').trim(),
+        back: correctText.trim(),
         options,
         correctOption,
         explanation: c.explanation ? String(c.explanation).trim() : null,

@@ -216,6 +216,11 @@ class _McqCardState extends ConsumerState<_McqCard>
   int? _chosenIndex;
   bool _isAnswered = false;
 
+  // Shuffled once per card in initState so the correct answer is never
+  // predictable even for cards already stored in Firestore.
+  late List<String> _shuffledOptions;
+  late int          _shuffledCorrectIndex;
+
   late final AnimationController _cardCtrl;
   late final Animation<Offset>   _cardSlide;
   late final Animation<double>   _cardFade;
@@ -224,6 +229,7 @@ class _McqCardState extends ConsumerState<_McqCard>
   @override
   void initState() {
     super.initState();
+    _initShuffle();
 
     _cardCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 260));
@@ -245,16 +251,22 @@ class _McqCardState extends ConsumerState<_McqCard>
     super.dispose();
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ── Shuffle (called once in initState) ────────────────────────────────────
 
-  List<String> get _options {
-    final opts = widget.card.options;
-    return opts.isNotEmpty
-        ? opts
+  void _initShuffle() {
+    final raw = widget.card.options.isNotEmpty
+        ? widget.card.options
         : ['True', 'False', 'Cannot be determined', 'None of the above'];
+    final correctText = raw[widget.card.correctOption?.clamp(0, raw.length - 1) ?? 0];
+    final shuffled    = List<String>.from(raw)..shuffle();
+    _shuffledOptions      = shuffled;
+    _shuffledCorrectIndex = shuffled.indexOf(correctText).clamp(0, shuffled.length - 1);
   }
 
-  int get _correctIndex => widget.card.correctOption ?? 0;
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  List<String> get _options          => _shuffledOptions;
+  int          get _correctIndex     => _shuffledCorrectIndex;
 
   _OptionState _stateFor(int i) {
     if (!_isAnswered) return _OptionState.idle;

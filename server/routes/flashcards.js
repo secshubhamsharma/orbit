@@ -122,15 +122,22 @@ Rules:
   cards.forEach((card, index) => {
     if (!card.front || !Array.isArray(card.options) || card.options.length < 2) return;
 
+    // Shuffle options so the correct answer is not always in the same position.
+    const rawOptions   = card.options.map(String).slice(0, 4);
+    const rawCorrect   = typeof card.correctOption === 'number' ? card.correctOption : 0;
+    const correctText  = rawOptions[rawCorrect] ?? rawOptions[0];
+    const shuffled     = rawOptions.sort(() => Math.random() - 0.5);
+    const correctIndex = shuffled.indexOf(correctText);
+
     const ref = cardsRef.doc();
     batch.set(ref, {
       id: ref.id,
       topicId,
       type: 'mcq',
       front: String(card.front).trim(),
-      back: String(card.back ?? card.options[card.correctOption ?? 0]).trim(),
-      options: card.options.map(String).slice(0, 4),
-      correctOption: typeof card.correctOption === 'number' ? card.correctOption : 0,
+      back: correctText.trim(),
+      options: shuffled,
+      correctOption: correctIndex >= 0 ? correctIndex : 0,
       explanation: card.explanation ? String(card.explanation).trim() : null,
       difficulty: validDifficulties.includes(card.difficulty)
         ? card.difficulty
