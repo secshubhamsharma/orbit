@@ -75,19 +75,45 @@ router.post("/process", upload.single("pdf"), async (req, res) => {
 
     const text = rawText.slice(0, MAX_TEXT_CHARS);
 
+    // Attempt generation. If the first try hits a rate/size limit, retry once
+    // with half the text — large PDFs sometimes push past burst limits.
     let chapters;
     try {
       chapters = await generateChapters(topicName, text);
     } catch (aiErr) {
       const details = aiErr.message || "Unknown AI error";
-      const statusCode = aiErr.status || aiErr.statusCode || "";
-      console.error(`[PDF] Groq failed (${statusCode}):`, details);
-      await markFailed(uploadRef, `AI generation failed: ${details}`);
-      return res.status(500).json({
-        success: false,
-        message: "AI could not process this PDF. Please try again later.",
-        details,
-      });
+      const statusCode = String(aiErr.status || aiErr.statusCode || "");
+      console.error(`[PDF] Groq attempt 1 failed (${statusCode}):`, details);
+
+      const isRetryable =
+        statusCode === "429" ||
+        details.toLowerCase().includes("rate") ||
+        details.toLowerCase().includes("token") ||
+        details.toLowerCase().includes("too large");
+
+      if (isRetryable) {
+        console.log("[PDF] Retrying with reduced text (half length)...");
+        try {
+          await new Promise((r) => setTimeout(r, 3000)); // 3 s back-off
+          chapters = await generateChapters(topicName, text.slice(0, MAX_TEXT_CHARS / 2));
+        } catch (retryErr) {
+          const retryDetails = retryErr.message || "Unknown AI error";
+          console.error("[PDF] Groq attempt 2 failed:", retryDetails);
+          await markFailed(uploadRef, `AI generation failed: ${retryDetails}`);
+          return res.status(500).json({
+            success: false,
+            message: "AI could not process this PDF. Please try again later.",
+            details: retryDetails,
+          });
+        }
+      } else {
+        await markFailed(uploadRef, `AI generation failed: ${details}`);
+        return res.status(500).json({
+          success: false,
+          message: "AI could not process this PDF. Please try again later.",
+          details,
+        });
+      }
     }
 
     if (!chapters || chapters.length === 0) {
