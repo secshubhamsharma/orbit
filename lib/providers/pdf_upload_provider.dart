@@ -209,23 +209,30 @@ class UploadNotifier extends StateNotifier<UploadState> {
     if (message.isEmpty) {
       return 'Something went wrong. Please try again.';
     }
-    // Quota / rate limit
-    if (raw.contains('quota') ||
-        raw.contains('Too Many Requests') ||
-        raw.contains('429')) {
-      return 'PDF generation is temporarily unavailable. Please try again later.';
+    // Groq rate-limit — must come BEFORE the org-restriction check because
+    // Groq rate-limit messages also contain the word "organization"
+    // e.g. "Rate limit reached for model X in organization Y. Limit 6000 TPM."
+    if (raw.contains('rate') ||
+        raw.contains('Rate limit') ||
+        raw.contains('tokens per minute') ||
+        raw.contains('TPM') ||
+        raw.contains('quota') ||
+        raw.contains('429') ||
+        raw.contains('Too Many Requests')) {
+      return 'The AI is processing too many requests right now. Please wait a moment and try again.';
     }
-    // Groq org restricted
-    if (raw.contains('restricted') || raw.contains('organization')) {
-      return 'AI service is temporarily unavailable. Please try again later or contact support.';
+    // Groq org hard-restricted (account banned, not a rate limit)
+    if (raw.contains('restricted') && !raw.contains('rate')) {
+      return 'AI service is unavailable for this account. Please contact support.';
     }
-    // Groq / AI error (keep before generic server error)
+    // Generic AI / Groq error
     if (raw.contains('AI generation failed') ||
         raw.contains('Groq') ||
         raw.contains('groq') ||
         raw.contains('context') ||
-        raw.contains('token')) {
-      return 'AI could not process this PDF. Try a shorter document or try again later.';
+        raw.contains('token') ||
+        raw.contains('organization')) {
+      return 'AI could not process this PDF. Please try again in a moment.';
     }
     // Network / connectivity
     if (raw.contains('timeout')) {

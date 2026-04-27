@@ -23,11 +23,16 @@ const upload = multer({
   },
 });
 
-const MAX_TEXT_CHARS = 40000;
+// llama-3.1-8b-instant: 131,072 TPM free tier — handles large PDFs without
+// hitting rate limits. llama-3.3-70b-versatile only has 6,000 TPM free tier
+// which is exceeded by any PDF larger than ~1 MB.
+const PDF_MODEL = "llama-3.1-8b-instant";
+
+const MAX_TEXT_CHARS = 24000; // ~6,000 tokens of PDF text — fits comfortably
 const MAX_CHAPTERS = 8;
 const MIN_CHAPTERS = 2;
 const CARDS_PER_CHAPTER_MIN = 5;
-const CARDS_PER_CHAPTER_MAX = 12;
+const CARDS_PER_CHAPTER_MAX = 10;
 
 router.post("/process", upload.single("pdf"), async (req, res) => {
   const { uploadId, topicName, domainId } = req.body;
@@ -180,14 +185,16 @@ ${text}
   let responseText;
   try {
     const completion = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      model: PDF_MODEL,
       messages: [{ role: "user", content: prompt }],
       temperature: 0.4,
-      max_tokens: 8192,
+      max_tokens: 6000,
     });
     responseText = completion.choices[0].message.content.trim();
   } catch (err) {
-    throw new Error(`Groq API error: ${err.message}`);
+    // Surface the real Groq error status so the caller can log it properly
+    const status = err.status || err.statusCode || "unknown";
+    throw new Error(`Groq API error ${status}: ${err.message}`);
   }
 
   const cleaned = responseText
