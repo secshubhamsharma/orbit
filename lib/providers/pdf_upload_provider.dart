@@ -209,32 +209,35 @@ class UploadNotifier extends StateNotifier<UploadState> {
     if (message.isEmpty) {
       return 'Something went wrong. Please try again.';
     }
-    // Groq rate-limit — must come BEFORE the org-restriction check because
-    // Groq rate-limit messages also contain the word "organization"
-    // e.g. "Rate limit reached for model X in organization Y. Limit 6000 TPM."
+
+    // ── Server-generated clean messages (pass through as-is) ──────────────────
+    // These come from our updated server and are already user-friendly.
+    if (raw.contains('AI service account is restricted')) {
+      return 'AI service is unavailable. Please contact support.';
+    }
+    if (raw.contains('AI is overloaded') || raw.contains('try again in a few minutes')) {
+      return 'The AI is busy right now. Please wait a moment and try again.';
+    }
+    if (raw.contains('AI could not process this PDF')) {
+      return 'AI could not process this PDF. Please try again.';
+    }
+    if (raw.contains('File is too large') || raw.contains('under 20 MB')) {
+      return 'File is too large. Please upload a PDF under 20 MB.';
+    }
+    if (raw.contains('No study content') || raw.contains('readable text')) {
+      return raw; // already user-friendly
+    }
+
+    // ── Fallback patterns for unexpected raw messages ─────────────────────────
     if (raw.contains('rate') ||
-        raw.contains('Rate limit') ||
-        raw.contains('tokens per minute') ||
-        raw.contains('TPM') ||
-        raw.contains('quota') ||
         raw.contains('429') ||
+        raw.contains('TPM') ||
         raw.contains('Too Many Requests')) {
-      return 'The AI is processing too many requests right now. Please wait a moment and try again.';
+      return 'The AI is processing too many requests. Please wait and try again.';
     }
-    // Groq org hard-restricted (account banned, not a rate limit)
-    if (raw.contains('restricted') && !raw.contains('rate')) {
-      return 'AI service is unavailable for this account. Please contact support.';
+    if (raw.contains('restricted') || raw.contains('forbidden') || raw.contains('403')) {
+      return 'AI service is unavailable. Please contact support.';
     }
-    // Generic AI / Groq error
-    if (raw.contains('AI generation failed') ||
-        raw.contains('Groq') ||
-        raw.contains('groq') ||
-        raw.contains('context') ||
-        raw.contains('token') ||
-        raw.contains('organization')) {
-      return 'AI could not process this PDF. Please try again in a moment.';
-    }
-    // Network / connectivity
     if (raw.contains('timeout')) {
       return 'The request timed out. The server may be busy — try again.';
     }
@@ -244,13 +247,10 @@ class UploadNotifier extends StateNotifier<UploadState> {
     if (raw.contains('Cleartext HTTP traffic')) {
       return 'The app could not reach the server over HTTP on this device.';
     }
-    // Actual file-size rejection (multer LIMIT_FILE_SIZE or 413)
-    if (raw.contains('LIMIT_FILE_SIZE') ||
-        raw.contains('413') ||
-        raw.contains('File too large') ||
-        raw.contains('20MB')) {
+    if (raw.contains('LIMIT_FILE_SIZE') || raw.contains('413')) {
       return 'File is too large. Please upload a PDF under 20 MB.';
     }
+
     return message;
   }
 }

@@ -34,7 +34,51 @@ const MIN_CHAPTERS = 2;
 const CARDS_PER_CHAPTER_MIN = 5;
 const CARDS_PER_CHAPTER_MAX = 10;
 
-router.post("/process", upload.single("pdf"), async (req, res) => {
+// ─── Groq connectivity test (auth-protected) ─────────────────────────────────
+// Hit GET /api/pdf/test-groq to verify the key and model without uploading a file.
+router.get("/test-groq", async (_req, res) => {
+  try {
+    const completion = await groq.chat.completions.create({
+      model: PDF_MODEL,
+      messages: [{ role: "user", content: "Reply with the single word: ok" }],
+      temperature: 0,
+      max_tokens: 5,
+    });
+    const reply = completion.choices[0].message.content.trim();
+    res.json({ success: true, model: PDF_MODEL, reply });
+  } catch (err) {
+    const status = err.status || err.statusCode || "unknown";
+    console.error(`[GROQ-TEST] failed (${status}):`, err.message);
+    res.status(500).json({
+      success: false,
+      model: PDF_MODEL,
+      status,
+      message: err.message,
+    });
+  }
+});
+
+// ─── Multer error handler wrapper ─────────────────────────────────────────────
+// multer calls next(err) on LIMIT_FILE_SIZE etc., bypassing our route handler.
+// We intercept it here so the response shape stays consistent.
+function uploadWithErrorHandling(req, res, next) {
+  upload.single("pdf")(req, res, (err) => {
+    if (!err) return next();
+    console.error("[PDF] Multer error:", err.code, err.message);
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({
+        success: false,
+        message: "File is too large. Please upload a PDF under 20 MB.",
+      });
+    }
+    return res.status(400).json({
+      success: false,
+      message: err.message || "File upload failed.",
+    });
+  });
+}
+
+router.post("/process", uploadWithErrorHandling, async (req, res) => {
   const { uploadId, topicName, domainId } = req.body;
   const filePath = req.file?.path;
 
@@ -82,14 +126,33 @@ router.post("/process", upload.single("pdf"), async (req, res) => {
       chapters = await generateChapters(topicName, text);
     } catch (aiErr) {
       const details = aiErr.message || "Unknown AI error";
-      const statusCode = String(aiErr.status || aiErr.statusCode || "");
-      console.error(`[PDF] Groq attempt 1 failed (${statusCode}):`, details);
+      // aiErr is a plain Error we threw — status is embedded in the message
+      // e.g. "Groq API error 429: ..." or "Groq API error 400: ..."
+      const statusMatch = details.match(/Groq API error (\d+)/);
+      const statusCode = statusMatch ? statusMatch[1] : "";
+      console.error(`[PDF] Groq attempt 1 failed (status=${statusCode || "unknown"}):`, details);
+
+      // 400 / 403 with "restricted" means the account is banned — not retryable.
+      const isAccountBanned =
+        (statusCode === "400" || statusCode === "403") &&
+        (details.toLowerCase().includes("restricted") ||
+          details.toLowerCase().includes("forbidden") ||
+          details.toLowerCase().includes("deactivated"));
+
+      if (isAccountBanned) {
+        console.error("[PDF] Groq account appears to be restricted. Check your API key / org.");
+        await markFailed(uploadRef, "AI service account is restricted. Please contact support.");
+        return res.status(500).json({
+          success: false,
+          message: "AI service account is restricted. Please contact support.",
+        });
+      }
 
       const isRetryable =
         statusCode === "429" ||
         details.toLowerCase().includes("rate") ||
-        details.toLowerCase().includes("token") ||
-        details.toLowerCase().includes("too large");
+        details.toLowerCase().includes("too large") ||
+        details.toLowerCase().includes("context length");
 
       if (isRetryable) {
         console.log("[PDF] Retrying with reduced text (half length)...");
@@ -99,19 +162,17 @@ router.post("/process", upload.single("pdf"), async (req, res) => {
         } catch (retryErr) {
           const retryDetails = retryErr.message || "Unknown AI error";
           console.error("[PDF] Groq attempt 2 failed:", retryDetails);
-          await markFailed(uploadRef, `AI generation failed: ${retryDetails}`);
+          await markFailed(uploadRef, "AI is overloaded. Please try again in a few minutes.");
           return res.status(500).json({
             success: false,
-            message: "AI could not process this PDF. Please try again later.",
-            details: retryDetails,
+            message: "AI is overloaded. Please try again in a few minutes.",
           });
         }
       } else {
-        await markFailed(uploadRef, `AI generation failed: ${details}`);
+        await markFailed(uploadRef, "AI could not process this PDF. Please try again.");
         return res.status(500).json({
           success: false,
-          message: "AI could not process this PDF. Please try again later.",
-          details,
+          message: "AI could not process this PDF. Please try again.",
         });
       }
     }
