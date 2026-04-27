@@ -23,10 +23,10 @@ const upload = multer({
   },
 });
 
-// llama-3.1-8b-instant: 131,072 TPM free tier — handles large PDFs without
-// hitting rate limits. llama-3.3-70b-versatile only has 6,000 TPM free tier
-// which is exceeded by any PDF larger than ~1 MB.
-const PDF_MODEL = "llama-3.1-8b-instant";
+// Model is configurable via env so you can override without redeploying code.
+// Default: llama-3.1-8b-instant (131,072 TPM free tier — handles large PDFs).
+// llama-3.3-70b-versatile has only 6,000 TPM and fails on files > ~1 MB.
+const PDF_MODEL = process.env.GROQ_PDF_MODEL || "llama-3.1-8b-instant";
 
 const MAX_TEXT_CHARS = 24000; // ~6,000 tokens of PDF text — fits comfortably
 const MAX_CHAPTERS = 8;

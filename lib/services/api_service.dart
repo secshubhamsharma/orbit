@@ -193,9 +193,6 @@ class ApiService {
     final serverMessage = responseData is Map
         ? responseData['message'] as String?
         : null;
-    final serverDetails = responseData is Map
-        ? responseData['details'] as String?
-        : null;
     final dioMessage = e.message?.trim();
 
     return switch (statusCode) {
@@ -207,7 +204,9 @@ class ApiService {
           'Too many requests. Please wait a moment and try again.',
           code: 'rate_limited'),
       500 => ApiException(
-          serverDetails ?? serverMessage ?? 'Server error. Please try again later.',
+          // Use the human-friendly message from the server, not the raw
+          // technical details (which leak Groq error text to _friendlyError).
+          serverMessage ?? 'Server error. Please try again later.',
           code: 'server_error'),
       _ => ApiException(
           serverMessage ??
