@@ -1,93 +1,86 @@
-const express = require('express');
-const multer = require('multer');
-const fs = require('fs');
-const pdfParse = require('pdf-parse');
-const Groq = require('groq-sdk');
-const { getFirestore } = require('../utils/firebase');
+const express = require("express");
+const multer = require("multer");
+const fs = require("fs");
+const pdfParse = require("pdf-parse");
+const Groq = require("groq-sdk");
+const { getFirestore } = require("../utils/firebase");
 
 const router = express.Router();
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// ─── Temp upload directory ─────────────────────────────────────────────────────
-const UPLOAD_DIR = '/tmp/orbit-uploads';
+const UPLOAD_DIR = "/tmp/orbit-uploads";
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-// ─── Multer config ─────────────────────────────────────────────────────────────
 const upload = multer({
   dest: UPLOAD_DIR,
   limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype === 'application/pdf') {
+    if (file.mimetype === "application/pdf") {
       cb(null, true);
     } else {
-      cb(new Error('Only PDF files are accepted.'));
+      cb(new Error("Only PDF files are accepted."));
     }
   },
 });
 
-// ─── Constants ─────────────────────────────────────────────────────────────────
-const MAX_TEXT_CHARS        = 40000;
-const MAX_CHAPTERS          = 8;
-const MIN_CHAPTERS          = 2;
+const MAX_TEXT_CHARS = 40000;
+const MAX_CHAPTERS = 8;
+const MIN_CHAPTERS = 2;
 const CARDS_PER_CHAPTER_MIN = 5;
 const CARDS_PER_CHAPTER_MAX = 12;
 
-// ─── POST /api/pdf/process ────────────────────────────────────────────────────
-router.post('/process', upload.single('pdf'), async (req, res) => {
+router.post("/process", upload.single("pdf"), async (req, res) => {
   const { uploadId, topicName, domainId } = req.body;
   const filePath = req.file?.path;
 
-  // ── Validation ─────────────────────────────────────────────────────────────
   if (!uploadId || !topicName || !domainId) {
     cleanupFile(filePath);
     return res.status(400).json({
       success: false,
-      message: 'uploadId, topicName and domainId are required.',
+      message: "uploadId, topicName and domainId are required.",
     });
   }
   if (!req.file) {
     return res
       .status(400)
-      .json({ success: false, message: 'PDF file is required.' });
+      .json({ success: false, message: "PDF file is required." });
   }
 
   const db = getFirestore();
-  const uploadRef = db.collection('uploads').doc(uploadId);
+  const uploadRef = db.collection("uploads").doc(uploadId);
 
   try {
-    // ── 1. Mark as processing ────────────────────────────────────────────────
-    await uploadRef.update({ status: 'processing' });
+    await uploadRef.update({ status: "processing" });
 
-    // ── 2. Extract text from PDF ─────────────────────────────────────────────
     const buffer = fs.readFileSync(filePath);
     const parsed = await pdfParse(buffer);
     const pageCount = parsed.numpages;
-    const rawText = parsed.text?.trim() || '';
+    const rawText = parsed.text?.trim() || "";
 
     if (rawText.length < 100) {
       await markFailed(
         uploadRef,
-        'Could not extract readable text from this PDF. Make sure it is not a scanned image-only PDF.',
+        "Could not extract readable text from this PDF. Make sure it is not a scanned image-only PDF.",
       );
       return res.status(422).json({
         success: false,
-        message: 'Could not extract readable text from the PDF.',
+        message: "Could not extract readable text from the PDF.",
       });
     }
 
     const text = rawText.slice(0, MAX_TEXT_CHARS);
 
-    // ── 3. Generate chapter-wise MCQ with Groq ───────────────────────────────
     let chapters;
     try {
       chapters = await generateChapters(topicName, text);
     } catch (aiErr) {
-      const details = aiErr.message || 'Unknown AI error';
-      console.error('[PDF] Groq failed:', details);
+      const details = aiErr.message || "Unknown AI error";
+      const statusCode = aiErr.status || aiErr.statusCode || "";
+      console.error(`[PDF] Groq failed (${statusCode}):`, details);
       await markFailed(uploadRef, `AI generation failed: ${details}`);
       return res.status(500).json({
         success: false,
-        message: `AI generation failed: ${details}`,
+        message: "AI could not process this PDF. Please try again later.",
         details,
       });
     }
@@ -95,14 +88,13 @@ router.post('/process', upload.single('pdf'), async (req, res) => {
     if (!chapters || chapters.length === 0) {
       await markFailed(
         uploadRef,
-        'AI could not identify any study content in this PDF.',
+        "AI could not identify any study content in this PDF.",
       );
       return res
         .status(422)
-        .json({ success: false, message: 'No study content found in PDF.' });
+        .json({ success: false, message: "No study content found in PDF." });
     }
 
-    // ── 4. Write chapters + cards to Firestore ───────────────────────────────
     const { totalCards } = await writeChaptersToFirestore(
       db,
       uploadRef,
@@ -112,7 +104,7 @@ router.post('/process', upload.single('pdf'), async (req, res) => {
 
     // ── 5. Mark completed ────────────────────────────────────────────────────
     await uploadRef.update({
-      status: 'completed',
+      status: "completed",
       pageCount,
       generatedCardCount: totalCards,
       completedAt: new Date().toISOString(),
@@ -128,19 +120,19 @@ router.post('/process', upload.single('pdf'), async (req, res) => {
       chapterCount: chapters.length,
     });
   } catch (err) {
-    console.error('[PDF] Unexpected error:', err.message);
-    await markFailed(uploadRef, err.message || 'Processing failed').catch(
+    console.error("[PDF] Unexpected error:", err.message);
+    await markFailed(uploadRef, err.message || "Processing failed").catch(
       () => {},
     );
-    res
-      .status(500)
-      .json({ success: false, message: 'PDF processing failed. Please try again.' });
+    res.status(500).json({
+      success: false,
+      message: "PDF processing failed. Please try again.",
+    });
   } finally {
     cleanupFile(filePath);
   }
 });
 
-// ─── Groq: detect chapters and generate MCQ ───────────────────────────────────
 async function generateChapters(topicName, text) {
   const prompt = `
 You are an expert educator. A student uploaded a PDF titled "${topicName}".
@@ -188,8 +180,8 @@ ${text}
   let responseText;
   try {
     const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: prompt }],
+      model: "llama-3.3-70b-versatile",
+      messages: [{ role: "user", content: prompt }],
       temperature: 0.4,
       max_tokens: 8192,
     });
@@ -198,30 +190,26 @@ ${text}
     throw new Error(`Groq API error: ${err.message}`);
   }
 
-  // Strip markdown fences if model adds them despite instructions
   const cleaned = responseText
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```\s*$/, '')
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
     .trim();
 
   let parsed;
   try {
     parsed = JSON.parse(cleaned);
   } catch (_) {
-    // Try to salvage a JSON object buried in extra text
     const match = cleaned.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('AI returned non-JSON response');
+    if (!match) throw new Error("AI returned non-JSON response");
     parsed = JSON.parse(match[0]);
   }
 
   if (!parsed.chapters || !Array.isArray(parsed.chapters)) {
-    throw new Error('AI response missing chapters array');
+    throw new Error("AI response missing chapters array");
   }
 
   return parsed.chapters
-    .filter(
-      (ch) => ch.title && Array.isArray(ch.cards) && ch.cards.length > 0,
-    )
+    .filter((ch) => ch.title && Array.isArray(ch.cards) && ch.cards.length > 0)
     .slice(0, MAX_CHAPTERS)
     .map((ch, i) => ({
       title: String(ch.title).trim(),
@@ -230,30 +218,28 @@ ${text}
     }));
 }
 
-// ─── Sanitize individual card objects ─────────────────────────────────────────
 function sanitizeCards(rawCards) {
-  const validDiffs = ['easy', 'medium', 'hard'];
+  const validDiffs = ["easy", "medium", "hard"];
 
   return rawCards
-    .filter(
-      (c) => c.front && Array.isArray(c.options) && c.options.length >= 2,
-    )
+    .filter((c) => c.front && Array.isArray(c.options) && c.options.length >= 2)
     .slice(0, CARDS_PER_CHAPTER_MAX)
     .map((c, index) => {
-      const rawCorrect    = typeof c.correctOption === 'number' ? c.correctOption : 0;
-      const rawOptions    = c.options.map(String).slice(0, 4);
-      const correctText   = rawOptions[rawCorrect] ?? rawOptions[0];
-      // Shuffle so the correct answer is not predictably in the same slot.
-      const options       = rawOptions.sort(() => Math.random() - 0.5);
+      const rawCorrect =
+        typeof c.correctOption === "number" ? c.correctOption : 0;
+      const rawOptions = c.options.map(String).slice(0, 4);
+      const correctText = rawOptions[rawCorrect] ?? rawOptions[0];
+
+      const options = rawOptions.sort(() => Math.random() - 0.5);
       const correctOption = Math.max(0, options.indexOf(correctText));
       return {
-        type: 'mcq',
+        type: "mcq",
         front: String(c.front).trim(),
         back: correctText.trim(),
         options,
         correctOption,
         explanation: c.explanation ? String(c.explanation).trim() : null,
-        difficulty: validDiffs.includes(c.difficulty) ? c.difficulty : 'medium',
+        difficulty: validDiffs.includes(c.difficulty) ? c.difficulty : "medium",
         tags: [],
         order: index,
         generatedByAI: true,
@@ -284,7 +270,7 @@ async function writeChaptersToFirestore(db, uploadRef, uploadId, chapters) {
   };
 
   for (const chapter of chapters) {
-    const chapterRef = uploadRef.collection('chapters').doc();
+    const chapterRef = uploadRef.collection("chapters").doc();
     const chapterId = chapterRef.id;
 
     addToBatch(chapterRef, {
@@ -296,7 +282,7 @@ async function writeChaptersToFirestore(db, uploadRef, uploadId, chapters) {
     });
 
     for (const card of chapter.cards) {
-      const cardRef = chapterRef.collection('cards').doc();
+      const cardRef = chapterRef.collection("cards").doc();
       addToBatch(cardRef, {
         ...card,
         id: cardRef.id,
@@ -313,9 +299,8 @@ async function writeChaptersToFirestore(db, uploadRef, uploadId, chapters) {
   return { totalCards };
 }
 
-// ─── Helpers ───────────────────────────────────────────────────────────────────
 async function markFailed(uploadRef, error) {
-  return uploadRef.update({ status: 'failed', error }).catch(() => {});
+  return uploadRef.update({ status: "failed", error }).catch(() => {});
 }
 
 function cleanupFile(filePath) {

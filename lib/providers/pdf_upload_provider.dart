@@ -209,11 +209,25 @@ class UploadNotifier extends StateNotifier<UploadState> {
     if (message.isEmpty) {
       return 'Something went wrong. Please try again.';
     }
+    // Quota / rate limit
     if (raw.contains('quota') ||
         raw.contains('Too Many Requests') ||
         raw.contains('429')) {
-      return 'PDF generation is temporarily unavailable because the AI quota has been exceeded. Please try again later.';
+      return 'PDF generation is temporarily unavailable. Please try again later.';
     }
+    // Groq org restricted
+    if (raw.contains('restricted') || raw.contains('organization')) {
+      return 'AI service is temporarily unavailable. Please try again later or contact support.';
+    }
+    // Groq / AI error (keep before generic server error)
+    if (raw.contains('AI generation failed') ||
+        raw.contains('Groq') ||
+        raw.contains('groq') ||
+        raw.contains('context') ||
+        raw.contains('token')) {
+      return 'AI could not process this PDF. Try a shorter document or try again later.';
+    }
+    // Network / connectivity
     if (raw.contains('timeout')) {
       return 'The request timed out. The server may be busy — try again.';
     }
@@ -223,7 +237,11 @@ class UploadNotifier extends StateNotifier<UploadState> {
     if (raw.contains('Cleartext HTTP traffic')) {
       return 'The app could not reach the server over HTTP on this device.';
     }
-    if (raw.contains('20MB') || raw.contains('size')) {
+    // Actual file-size rejection (multer LIMIT_FILE_SIZE or 413)
+    if (raw.contains('LIMIT_FILE_SIZE') ||
+        raw.contains('413') ||
+        raw.contains('File too large') ||
+        raw.contains('20MB')) {
       return 'File is too large. Please upload a PDF under 20 MB.';
     }
     return message;
