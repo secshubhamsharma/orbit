@@ -2,7 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const fs = require("fs");
 const pdfParse = require("pdf-parse");
-const { getModel } = require("../utils/gemini");
+const { generateText, isRateLimitError } = require("../utils/ai");
 const { getFirestore } = require("../utils/firebase");
 
 const router = express.Router();
@@ -30,29 +30,49 @@ const MIN_CHAPTERS = 2;
 const CARDS_PER_CHAPTER_MIN = 5;
 const CARDS_PER_CHAPTER_MAX = 8; // 8 chapters × 8 cards = 64 max cards (~6,400 output tokens)
 
-// ─── Gemini connectivity test ─────────────────────────────────────────────────
-// GET /api/pdf/test-gemini — verify the key works before uploading a PDF.
-router.get("/test-gemini", async (_req, res) => {
+// ─── AI connectivity test ─────────────────────────────────────────────────────
+// GET /api/pdf/test-ai — verify Gemini (and OpenRouter fallback) work.
+router.get("/test-ai", async (_req, res) => {
   try {
-    const model = getModel();
-    const result = await model.generateContent(
-      'Reply with the single word: ok'
-    );
-    const reply = result.response.text().trim();
+    const { getModel } = require("../utils/gemini");
+    const { isRateLimitError } = require("../utils/ai");
+
+    let geminiOk = false, geminiError = null, openRouterOk = false, openRouterError = null;
+
+    // Test Gemini directly
+    try {
+      const model = getModel();
+      const result = await model.generateContent("Reply with the single word: ok");
+      geminiOk = result.response.text().trim().toLowerCase().includes("ok");
+    } catch (err) {
+      geminiError = { status: err.status || err.statusCode, message: err.message, isRateLimit: isRateLimitError(err) };
+    }
+
+    // Test OpenRouter if key is present
+    const orKey = process.env.OPENROUTER_API_KEY;
+    if (orKey) {
+      try {
+        const orModel = process.env.OPENROUTER_MODEL || "meta-llama/llama-3.1-8b-instruct:free";
+        const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${orKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ model: orModel, messages: [{ role: "user", content: "Reply with the single word: ok" }], max_tokens: 8 }),
+        });
+        const data = await orRes.json();
+        openRouterOk = orRes.ok && !!data.choices?.[0]?.message?.content;
+        if (!orRes.ok) openRouterError = data.error?.message || `HTTP ${orRes.status}`;
+      } catch (err) {
+        openRouterError = err.message;
+      }
+    }
+
     res.json({
-      success: true,
-      model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
-      reply,
+      gemini:     { ok: geminiOk,     model: process.env.GEMINI_MODEL || "gemini-1.5-flash", error: geminiError },
+      openRouter: { ok: openRouterOk, model: process.env.OPENROUTER_MODEL || "meta-llama/llama-3.1-8b-instruct:free", configured: !!orKey, error: openRouterError },
+      willWork:   geminiOk || openRouterOk,
     });
   } catch (err) {
-    const status = err.status || err.statusCode || "unknown";
-    console.error(`[GEMINI-TEST] failed (${status}):`, err.message);
-    res.status(500).json({
-      success: false,
-      model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
-      status,
-      message: err.message,
-    });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -120,48 +140,31 @@ router.post("/process", uploadWithErrorHandling, async (req, res) => {
 
     const text = rawText.slice(0, MAX_TEXT_CHARS);
 
-    // ── 2. Generate chapters via Gemini ──────────────────────────────────────
+    // ── 2. Generate chapters via AI (Gemini → OpenRouter fallback) ──────────
     let chapters;
     try {
       chapters = await generateChapters(topicName, text);
     } catch (aiErr) {
-      const status = aiErr.status || aiErr.statusCode || "unknown";
+      const status  = aiErr.status || aiErr.statusCode || "unknown";
       const details = aiErr.message || "Unknown AI error";
-      console.error(`[PDF] Gemini attempt 1 failed (status=${status}):`, details);
+      console.error(`[PDF] AI generation failed (status=${status}):`, details);
 
-      // Gemini 429 message: "Resource has been exhausted (e.g. check quota)."
-      const isRateLimit =
-        String(status) === "429" ||
-        details.toLowerCase().includes("rate") ||
-        details.toLowerCase().includes("quota") ||
-        details.toLowerCase().includes("exhausted") ||
-        details.toLowerCase().includes("resource has been");
-
-      if (isRateLimit) {
-        // Wait 60 s — enough for the RPM window to reset on the free tier (15 RPM).
-        // The Flutter client has a 3-minute receive timeout, so this is safe.
-        console.log("[PDF] Gemini rate limit — waiting 60 s before retry...");
-        try {
-          await new Promise((r) => setTimeout(r, 60000));
-          chapters = await generateChapters(topicName, text.slice(0, MAX_TEXT_CHARS / 2));
-        } catch (retryErr) {
-          console.error("[PDF] Gemini attempt 2 failed:", retryErr.message);
-          await markFailed(
-            uploadRef,
-            "AI rate limit reached. Please wait 1–2 minutes and try again."
-          );
-          return res.status(500).json({
-            success: false,
-            message: "AI rate limit reached. Please wait 1–2 minutes and try again.",
-          });
-        }
-      } else {
-        await markFailed(uploadRef, `AI error (${status}): ${details.slice(0, 120)}`);
+      if (isRateLimitError(aiErr)) {
+        await markFailed(
+          uploadRef,
+          "AI quota exhausted and no fallback available. Please try again later."
+        );
         return res.status(500).json({
           success: false,
-          message: "AI could not process this PDF. Please try again.",
+          message: "AI is temporarily unavailable. Please try again in a few minutes.",
         });
       }
+
+      await markFailed(uploadRef, `AI error (${status}): ${details.slice(0, 120)}`);
+      return res.status(500).json({
+        success: false,
+        message: "AI could not process this PDF. Please try again.",
+      });
     }
 
     if (!chapters || chapters.length === 0) {
@@ -256,9 +259,7 @@ PDF TEXT:
 ${text}
 `.trim();
 
-  const model = getModel();
-  const result = await model.generateContent(prompt);
-  const raw = result.response.text().trim();
+  const raw = (await generateText(prompt)).trim();
 
   const cleaned = raw
     .replace(/^```(?:json)?\s*/i, "")

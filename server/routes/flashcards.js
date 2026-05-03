@@ -1,5 +1,5 @@
 const express = require("express");
-const { getModel } = require("../utils/gemini");
+const { generateText } = require("../utils/ai");
 const { getFirestore } = require("../utils/firebase");
 
 const router = express.Router();
@@ -82,12 +82,10 @@ Rules:
 - Content must be factually accurate for "${topicName}"
 `.trim();
 
-  // ── Call Gemini ────────────────────────────────────────────────────────────
+  // ── Call AI (Gemini → OpenRouter fallback) ────────────────────────────────
   let cards;
   try {
-    const model = getModel();
-    const result = await model.generateContent(prompt);
-    const raw = result.response.text().trim();
+    const raw = (await generateText(prompt)).trim();
 
     const cleaned = raw
       .replace(/^```(?:json)?\s*/i, "")
@@ -105,7 +103,7 @@ Rules:
     if (!Array.isArray(cards)) throw new Error("Response is not a JSON array");
   } catch (err) {
     const status = err.status || err.statusCode || "unknown";
-    console.error(`[FLASHCARDS] Gemini error (${status}):`, err.message);
+    console.error(`[FLASHCARDS] AI error (${status}):`, err.message);
     return res.status(500).json({
       success: false,
       message: "AI generation failed. Please try again.",
