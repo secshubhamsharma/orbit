@@ -28,11 +28,17 @@ const upload = multer({
 // llama-3.3-70b-versatile has only 6,000 TPM and fails on files > ~1 MB.
 const PDF_MODEL = process.env.GROQ_PDF_MODEL || "llama-3.1-8b-instant";
 
-const MAX_TEXT_CHARS = 24000; // ~6,000 tokens of PDF text — fits comfortably
-const MAX_CHAPTERS = 8;
+// Token budget breakdown for Groq on_demand tier (6,000 TPM limit):
+//   Prompt template overhead : ~400 tokens
+//   PDF text (8,000 chars)   : ~2,000 tokens
+//   max_tokens output         : 3,200 tokens
+//   Total                     : ~5,600 tokens  ← safely under 6,000 TPM
+// If the account is upgraded to Dev Tier (131,072 TPM), raise these freely.
+const MAX_TEXT_CHARS = 8000;
+const MAX_CHAPTERS = 5;
 const MIN_CHAPTERS = 2;
-const CARDS_PER_CHAPTER_MIN = 5;
-const CARDS_PER_CHAPTER_MAX = 10;
+const CARDS_PER_CHAPTER_MIN = 3;
+const CARDS_PER_CHAPTER_MAX = 6;
 
 // ─── Groq connectivity test (auth-protected) ─────────────────────────────────
 // Hit GET /api/pdf/test-groq to verify the key and model without uploading a file.
@@ -148,11 +154,16 @@ router.post("/process", uploadWithErrorHandling, async (req, res) => {
         });
       }
 
+      // 413 = Groq "Request too large" (on_demand TPM exceeded per-request)
+      // 429 = Groq standard rate limit (TPM exceeded per minute window)
       const isRetryable =
         statusCode === "429" ||
+        statusCode === "413" ||
         details.toLowerCase().includes("rate") ||
         details.toLowerCase().includes("too large") ||
-        details.toLowerCase().includes("context length");
+        details.toLowerCase().includes("context length") ||
+        details.toLowerCase().includes("tokens per minute") ||
+        details.toLowerCase().includes("reduce your message");
 
       if (isRetryable) {
         console.log("[PDF] Retrying with reduced text (half length)...");
@@ -275,7 +286,7 @@ ${text}
       model: PDF_MODEL,
       messages: [{ role: "user", content: prompt }],
       temperature: 0.4,
-      max_tokens: 6000,
+      max_tokens: 3200,
     });
     responseText = completion.choices[0].message.content.trim();
   } catch (err) {

@@ -185,7 +185,7 @@ class _LeaderboardScreenState extends ConsumerState<LeaderboardScreen>
               ),
 
               // ── Sticky "You" banner at bottom ────────────────────────────
-              if (inTop50 && myEntry != null)
+              if (inTop50)
                 SliverToBoxAdapter(
                   child: FadeTransition(
                     opacity: _fade(0.5, 0.9),
@@ -447,7 +447,7 @@ class _PodiumSlot extends StatelessWidget {
                     ? CachedNetworkImage(
                         imageUrl: entry!.photoUrl!,
                         fit: BoxFit.cover,
-                        errorWidget: (_, __, ___) => Center(
+                        errorWidget: (ctx, err, _) => Center(
                           child: Text(initials,
                               style: TextStyle(
                                 fontSize: position == 1 ? 22 : 16,
@@ -522,11 +522,9 @@ class _PodiumSlot extends StatelessWidget {
               topLeft: Radius.circular(6),
               topRight: Radius.circular(6),
             ),
-            border: Border(
-              top:   BorderSide(color: _medal.withValues(alpha: 0.5)),
-              left:  BorderSide(color: _medal.withValues(alpha: 0.2)),
-              right: BorderSide(color: _medal.withValues(alpha: 0.2)),
-            ),
+            // Border must be uniform color when borderRadius is set —
+            // Flutter constraint. Use a single alpha that reads well.
+            border: Border.all(color: _medal.withValues(alpha: 0.35)),
           ),
           alignment: Alignment.center,
           child: Column(
@@ -673,7 +671,7 @@ class _RankRow extends StatelessWidget {
                   ? CachedNetworkImage(
                       imageUrl: entry.photoUrl!,
                       fit: BoxFit.cover,
-                      errorWidget: (_, __, ___) => Center(
+                      errorWidget: (ctx, err, _) => Center(
                         child: Text(initials,
                             style: AppTextStyles.labelMedium
                                 .copyWith(color: AppColors.kTextPrimary)),
@@ -1033,7 +1031,7 @@ class _ShimmerState extends State<_Shimmer> with SingleTickerProviderStateMixin 
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _ctrl,
-      builder: (_, __) {
+      builder: (_, child) {
         final opacity = 0.25 + _ctrl.value * 0.25;
         return Opacity(
           opacity: opacity,
