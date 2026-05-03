@@ -219,6 +219,7 @@ final appRouter = GoRouter(
           name: RouteNames.uploadResult,
           builder: (context, state) => PdfResultScreen(
             uploadId: state.pathParameters['uploadId']!,
+            extra: state.extra as Map<String, String>?,
           ),
         ),
       ],

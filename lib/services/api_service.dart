@@ -14,7 +14,6 @@ class ApiService {
       baseUrl: dotenv.env['SERVER_BASE_URL'] ?? '',
       connectTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(seconds: 60), // Gemini can be slow
-      headers: {'Content-Type': 'application/json'},
     ));
 
     // Interceptor: attach fresh Firebase ID token to every request
@@ -32,6 +31,14 @@ class ApiService {
         handler.next(options);
       },
       onError: (err, handler) {
+        print(
+          '[API] ${err.requestOptions.method} ${err.requestOptions.baseUrl}'
+          '${err.requestOptions.path} failed: '
+          'status=${err.response?.statusCode} '
+          'type=${err.type} '
+          'data=${err.response?.data} '
+          'message=${err.message}',
+        );
         handler.next(err);
       },
     ));
@@ -120,6 +127,7 @@ class ApiService {
       final res = await _dio.post('/pdf/process',
           data: formData,
           options: Options(
+            contentType: 'multipart/form-data',
             receiveTimeout: const Duration(minutes: 3),
           ),
           onSendProgress: (sent, total) {
@@ -165,15 +173,27 @@ class ApiService {
     }
 
     if (e.type == DioExceptionType.connectionError) {
-      return const ApiException(
-          'Cannot reach the server. Please check your connection.',
-          code: 'no_connection');
+      final message = e.message ?? '';
+      if (message.contains('Cleartext HTTP traffic')) {
+        return const ApiException(
+          'The app cannot reach the server over HTTP on this device.',
+          code: 'cleartext_blocked',
+        );
+      }
+      return ApiException(
+        message.isNotEmpty
+            ? 'Cannot reach the server: $message'
+            : 'Cannot reach the server. Please check your connection.',
+        code: 'no_connection',
+      );
     }
 
     final statusCode = e.response?.statusCode;
-    final serverMessage = e.response?.data is Map
-        ? (e.response!.data as Map)['message'] as String?
+    final responseData = e.response?.data;
+    final serverMessage = responseData is Map
+        ? responseData['message'] as String?
         : null;
+    final dioMessage = e.message?.trim();
 
     return switch (statusCode) {
       401 => const ApiException('Session expired. Please sign in again.',
@@ -184,10 +204,14 @@ class ApiService {
           'Too many requests. Please wait a moment and try again.',
           code: 'rate_limited'),
       500 => ApiException(
+          // Use the human-friendly message from the server, not the raw
+          // technical details (which leak Groq error text to _friendlyError).
           serverMessage ?? 'Server error. Please try again later.',
           code: 'server_error'),
       _ => ApiException(
-          serverMessage ?? 'Something went wrong. Please try again.',
+          serverMessage ??
+              dioMessage ??
+              'Something went wrong. Please try again.',
           code: 'unknown'),
     };
   }

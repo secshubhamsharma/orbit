@@ -12,10 +12,11 @@ _$LeaderboardEntryModelImpl _$$LeaderboardEntryModelImplFromJson(
   userId: json['userId'] as String,
   displayName: json['displayName'] as String,
   photoUrl: json['photoUrl'] as String?,
-  weeklyCardsReviewed: (json['weeklyCardsReviewed'] as num?)?.toInt() ?? 0,
-  weeklyAccuracy: (json['weeklyAccuracy'] as num?)?.toDouble() ?? 0.0,
+  totalCardsReviewed: (json['totalCardsReviewed'] as num?)?.toInt() ?? 0,
+  overallAccuracy: (json['overallAccuracy'] as num?)?.toDouble() ?? 0.0,
   currentStreak: (json['currentStreak'] as num?)?.toInt() ?? 0,
   rank: (json['rank'] as num?)?.toInt() ?? 0,
+  score: (json['score'] as num?)?.toDouble() ?? 0.0,
   updatedAt: const NullableTimestampConverter().fromJson(json['updatedAt']),
 );
 
@@ -25,9 +26,10 @@ Map<String, dynamic> _$$LeaderboardEntryModelImplToJson(
   'userId': instance.userId,
   'displayName': instance.displayName,
   'photoUrl': instance.photoUrl,
-  'weeklyCardsReviewed': instance.weeklyCardsReviewed,
-  'weeklyAccuracy': instance.weeklyAccuracy,
+  'totalCardsReviewed': instance.totalCardsReviewed,
+  'overallAccuracy': instance.overallAccuracy,
   'currentStreak': instance.currentStreak,
   'rank': instance.rank,
+  'score': instance.score,
   'updatedAt': const NullableTimestampConverter().toJson(instance.updatedAt),
 };

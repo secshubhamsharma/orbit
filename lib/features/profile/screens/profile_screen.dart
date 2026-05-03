@@ -53,9 +53,7 @@ class ProfileScreen extends ConsumerWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Header
-// ---------------------------------------------------------------------------
+
 
 class _ProfileHeader extends StatelessWidget {
   final UserModel? user;
@@ -148,9 +146,6 @@ class _ProfileHeader extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Reusable avatar
-// ---------------------------------------------------------------------------
 
 class _Avatar extends StatelessWidget {
   final String? photoUrl;
@@ -194,9 +189,7 @@ class _Avatar extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Stats row
-// ---------------------------------------------------------------------------
+
 
 class _StatsRow extends StatelessWidget {
   final UserModel? user;
@@ -216,7 +209,7 @@ class _StatsRow extends StatelessWidget {
         children: [
           _StatCell(value: '$streak', label: 'Streak'),
           _Divider(),
-          _StatCell(value: '$cards', label: 'Cards'),
+          _StatCell(value: '$cards', label: 'MCQs'),
           _Divider(),
           _StatCell(value: '${accuracy.round()}%', label: 'Accuracy'),
           _Divider(),
@@ -255,9 +248,6 @@ class _Divider extends StatelessWidget {
       Container(width: 1, height: 32, color: AppColors.kBorder);
 }
 
-// ---------------------------------------------------------------------------
-// Badges
-// ---------------------------------------------------------------------------
 
 const _badgeMeta = <String, (String, String)>{
   'first_review': ('First Launch', 'Completed your first review session'),
@@ -369,9 +359,6 @@ class _BadgesSection extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Account section
-// ---------------------------------------------------------------------------
 
 class _AccountSection extends StatelessWidget {
   @override
@@ -399,9 +386,6 @@ class _AccountSection extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// App section
-// ---------------------------------------------------------------------------
 
 class _AppSection extends StatelessWidget {
   @override

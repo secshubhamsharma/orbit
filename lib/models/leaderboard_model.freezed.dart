@@ -26,10 +26,13 @@ mixin _$LeaderboardEntryModel {
   String get userId => throw _privateConstructorUsedError;
   String get displayName => throw _privateConstructorUsedError;
   String? get photoUrl => throw _privateConstructorUsedError;
-  int get weeklyCardsReviewed => throw _privateConstructorUsedError;
-  double get weeklyAccuracy => throw _privateConstructorUsedError;
+  int get totalCardsReviewed => throw _privateConstructorUsedError;
+  double get overallAccuracy => throw _privateConstructorUsedError;
   int get currentStreak => throw _privateConstructorUsedError;
-  int get rank => throw _privateConstructorUsedError;
+  int get rank =>
+      throw _privateConstructorUsedError; // populated client-side after sorting
+  double get score =>
+      throw _privateConstructorUsedError; // totalCardsReviewed × overallAccuracy
   @NullableTimestampConverter()
   DateTime? get updatedAt => throw _privateConstructorUsedError;
 
@@ -54,10 +57,11 @@ abstract class $LeaderboardEntryModelCopyWith<$Res> {
     String userId,
     String displayName,
     String? photoUrl,
-    int weeklyCardsReviewed,
-    double weeklyAccuracy,
+    int totalCardsReviewed,
+    double overallAccuracy,
     int currentStreak,
     int rank,
+    double score,
     @NullableTimestampConverter() DateTime? updatedAt,
   });
 }
@@ -83,10 +87,11 @@ class _$LeaderboardEntryModelCopyWithImpl<
     Object? userId = null,
     Object? displayName = null,
     Object? photoUrl = freezed,
-    Object? weeklyCardsReviewed = null,
-    Object? weeklyAccuracy = null,
+    Object? totalCardsReviewed = null,
+    Object? overallAccuracy = null,
     Object? currentStreak = null,
     Object? rank = null,
+    Object? score = null,
     Object? updatedAt = freezed,
   }) {
     return _then(
@@ -103,13 +108,13 @@ class _$LeaderboardEntryModelCopyWithImpl<
                 ? _value.photoUrl
                 : photoUrl // ignore: cast_nullable_to_non_nullable
                       as String?,
-            weeklyCardsReviewed: null == weeklyCardsReviewed
-                ? _value.weeklyCardsReviewed
-                : weeklyCardsReviewed // ignore: cast_nullable_to_non_nullable
+            totalCardsReviewed: null == totalCardsReviewed
+                ? _value.totalCardsReviewed
+                : totalCardsReviewed // ignore: cast_nullable_to_non_nullable
                       as int,
-            weeklyAccuracy: null == weeklyAccuracy
-                ? _value.weeklyAccuracy
-                : weeklyAccuracy // ignore: cast_nullable_to_non_nullable
+            overallAccuracy: null == overallAccuracy
+                ? _value.overallAccuracy
+                : overallAccuracy // ignore: cast_nullable_to_non_nullable
                       as double,
             currentStreak: null == currentStreak
                 ? _value.currentStreak
@@ -119,6 +124,10 @@ class _$LeaderboardEntryModelCopyWithImpl<
                 ? _value.rank
                 : rank // ignore: cast_nullable_to_non_nullable
                       as int,
+            score: null == score
+                ? _value.score
+                : score // ignore: cast_nullable_to_non_nullable
+                      as double,
             updatedAt: freezed == updatedAt
                 ? _value.updatedAt
                 : updatedAt // ignore: cast_nullable_to_non_nullable
@@ -142,10 +151,11 @@ abstract class _$$LeaderboardEntryModelImplCopyWith<$Res>
     String userId,
     String displayName,
     String? photoUrl,
-    int weeklyCardsReviewed,
-    double weeklyAccuracy,
+    int totalCardsReviewed,
+    double overallAccuracy,
     int currentStreak,
     int rank,
+    double score,
     @NullableTimestampConverter() DateTime? updatedAt,
   });
 }
@@ -168,10 +178,11 @@ class __$$LeaderboardEntryModelImplCopyWithImpl<$Res>
     Object? userId = null,
     Object? displayName = null,
     Object? photoUrl = freezed,
-    Object? weeklyCardsReviewed = null,
-    Object? weeklyAccuracy = null,
+    Object? totalCardsReviewed = null,
+    Object? overallAccuracy = null,
     Object? currentStreak = null,
     Object? rank = null,
+    Object? score = null,
     Object? updatedAt = freezed,
   }) {
     return _then(
@@ -188,13 +199,13 @@ class __$$LeaderboardEntryModelImplCopyWithImpl<$Res>
             ? _value.photoUrl
             : photoUrl // ignore: cast_nullable_to_non_nullable
                   as String?,
-        weeklyCardsReviewed: null == weeklyCardsReviewed
-            ? _value.weeklyCardsReviewed
-            : weeklyCardsReviewed // ignore: cast_nullable_to_non_nullable
+        totalCardsReviewed: null == totalCardsReviewed
+            ? _value.totalCardsReviewed
+            : totalCardsReviewed // ignore: cast_nullable_to_non_nullable
                   as int,
-        weeklyAccuracy: null == weeklyAccuracy
-            ? _value.weeklyAccuracy
-            : weeklyAccuracy // ignore: cast_nullable_to_non_nullable
+        overallAccuracy: null == overallAccuracy
+            ? _value.overallAccuracy
+            : overallAccuracy // ignore: cast_nullable_to_non_nullable
                   as double,
         currentStreak: null == currentStreak
             ? _value.currentStreak
@@ -204,6 +215,10 @@ class __$$LeaderboardEntryModelImplCopyWithImpl<$Res>
             ? _value.rank
             : rank // ignore: cast_nullable_to_non_nullable
                   as int,
+        score: null == score
+            ? _value.score
+            : score // ignore: cast_nullable_to_non_nullable
+                  as double,
         updatedAt: freezed == updatedAt
             ? _value.updatedAt
             : updatedAt // ignore: cast_nullable_to_non_nullable
@@ -220,10 +235,11 @@ class _$LeaderboardEntryModelImpl implements _LeaderboardEntryModel {
     required this.userId,
     required this.displayName,
     this.photoUrl,
-    this.weeklyCardsReviewed = 0,
-    this.weeklyAccuracy = 0.0,
+    this.totalCardsReviewed = 0,
+    this.overallAccuracy = 0.0,
     this.currentStreak = 0,
     this.rank = 0,
+    this.score = 0.0,
     @NullableTimestampConverter() this.updatedAt,
   });
 
@@ -238,23 +254,28 @@ class _$LeaderboardEntryModelImpl implements _LeaderboardEntryModel {
   final String? photoUrl;
   @override
   @JsonKey()
-  final int weeklyCardsReviewed;
+  final int totalCardsReviewed;
   @override
   @JsonKey()
-  final double weeklyAccuracy;
+  final double overallAccuracy;
   @override
   @JsonKey()
   final int currentStreak;
   @override
   @JsonKey()
   final int rank;
+  // populated client-side after sorting
+  @override
+  @JsonKey()
+  final double score;
+  // totalCardsReviewed × overallAccuracy
   @override
   @NullableTimestampConverter()
   final DateTime? updatedAt;
 
   @override
   String toString() {
-    return 'LeaderboardEntryModel(userId: $userId, displayName: $displayName, photoUrl: $photoUrl, weeklyCardsReviewed: $weeklyCardsReviewed, weeklyAccuracy: $weeklyAccuracy, currentStreak: $currentStreak, rank: $rank, updatedAt: $updatedAt)';
+    return 'LeaderboardEntryModel(userId: $userId, displayName: $displayName, photoUrl: $photoUrl, totalCardsReviewed: $totalCardsReviewed, overallAccuracy: $overallAccuracy, currentStreak: $currentStreak, rank: $rank, score: $score, updatedAt: $updatedAt)';
   }
 
   @override
@@ -267,13 +288,14 @@ class _$LeaderboardEntryModelImpl implements _LeaderboardEntryModel {
                 other.displayName == displayName) &&
             (identical(other.photoUrl, photoUrl) ||
                 other.photoUrl == photoUrl) &&
-            (identical(other.weeklyCardsReviewed, weeklyCardsReviewed) ||
-                other.weeklyCardsReviewed == weeklyCardsReviewed) &&
-            (identical(other.weeklyAccuracy, weeklyAccuracy) ||
-                other.weeklyAccuracy == weeklyAccuracy) &&
+            (identical(other.totalCardsReviewed, totalCardsReviewed) ||
+                other.totalCardsReviewed == totalCardsReviewed) &&
+            (identical(other.overallAccuracy, overallAccuracy) ||
+                other.overallAccuracy == overallAccuracy) &&
             (identical(other.currentStreak, currentStreak) ||
                 other.currentStreak == currentStreak) &&
             (identical(other.rank, rank) || other.rank == rank) &&
+            (identical(other.score, score) || other.score == score) &&
             (identical(other.updatedAt, updatedAt) ||
                 other.updatedAt == updatedAt));
   }
@@ -285,10 +307,11 @@ class _$LeaderboardEntryModelImpl implements _LeaderboardEntryModel {
     userId,
     displayName,
     photoUrl,
-    weeklyCardsReviewed,
-    weeklyAccuracy,
+    totalCardsReviewed,
+    overallAccuracy,
     currentStreak,
     rank,
+    score,
     updatedAt,
   );
 
@@ -315,10 +338,11 @@ abstract class _LeaderboardEntryModel implements LeaderboardEntryModel {
     required final String userId,
     required final String displayName,
     final String? photoUrl,
-    final int weeklyCardsReviewed,
-    final double weeklyAccuracy,
+    final int totalCardsReviewed,
+    final double overallAccuracy,
     final int currentStreak,
     final int rank,
+    final double score,
     @NullableTimestampConverter() final DateTime? updatedAt,
   }) = _$LeaderboardEntryModelImpl;
 
@@ -332,13 +356,15 @@ abstract class _LeaderboardEntryModel implements LeaderboardEntryModel {
   @override
   String? get photoUrl;
   @override
-  int get weeklyCardsReviewed;
+  int get totalCardsReviewed;
   @override
-  double get weeklyAccuracy;
+  double get overallAccuracy;
   @override
   int get currentStreak;
   @override
-  int get rank;
+  int get rank; // populated client-side after sorting
+  @override
+  double get score; // totalCardsReviewed × overallAccuracy
   @override
   @NullableTimestampConverter()
   DateTime? get updatedAt;

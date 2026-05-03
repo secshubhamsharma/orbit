@@ -219,6 +219,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 controller: _nameController,
                 style: AppTextStyles.bodyMedium,
                 textCapitalization: TextCapitalization.words,
+                maxLength: 30,
+                maxLines: 1,
                 decoration: _fieldDecor(
                     hint: 'Your name',
                     icon: Icons.person_outline_rounded),
@@ -227,6 +229,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     return 'Name cannot be empty';
                   }
                   if (v.trim().length < 2) return 'At least 2 characters';
+                  if (v.trim().length > 30) return 'Name too long (max 30 characters)';
                   return null;
                 },
               ),
