@@ -128,7 +128,7 @@ class ApiService {
           data: formData,
           options: Options(
             contentType: 'multipart/form-data',
-            receiveTimeout: const Duration(minutes: 3),
+            receiveTimeout: const Duration(minutes: 5), // 60s rate-limit wait + ~60s AI + buffer
           ),
           onSendProgress: (sent, total) {
             if (total > 0 && onProgress != null) {

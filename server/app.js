@@ -57,7 +57,7 @@ app.use((err, req, res, _next) => {
 });
 
 app.listen(PORT, () => {
-  const model = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
   const key = process.env.GEMINI_API_KEY;
   console.log(`Orbit server running on port ${PORT}`);
   console.log(`AI model   : ${model}`);

@@ -13,10 +13,13 @@ function getClient() {
 
 /**
  * Returns a configured Gemini model instance.
- * Defaults to GEMINI_MODEL env var, falling back to gemini-2.0-flash.
+ * Defaults to GEMINI_MODEL env var, falling back to gemini-1.5-flash.
+ * gemini-1.5-flash is used as the default because it is stable across all
+ * SDK versions and available on the free tier without additional setup.
+ * Set GEMINI_MODEL=gemini-2.0-flash in .env to use the newer model.
  */
 function getModel(modelName) {
-  const name = modelName || process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  const name = modelName || process.env.GEMINI_MODEL || "gemini-1.5-flash";
   return getClient().getGenerativeModel({
     model: name,
     generationConfig: {

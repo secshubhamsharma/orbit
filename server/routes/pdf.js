@@ -129,27 +129,34 @@ router.post("/process", uploadWithErrorHandling, async (req, res) => {
       const details = aiErr.message || "Unknown AI error";
       console.error(`[PDF] Gemini attempt 1 failed (status=${status}):`, details);
 
-      // 429 = rate limit (shouldn't happen on free tier, but handle gracefully)
-      const isRetryable =
+      // Gemini 429 message: "Resource has been exhausted (e.g. check quota)."
+      const isRateLimit =
         String(status) === "429" ||
         details.toLowerCase().includes("rate") ||
-        details.toLowerCase().includes("quota");
+        details.toLowerCase().includes("quota") ||
+        details.toLowerCase().includes("exhausted") ||
+        details.toLowerCase().includes("resource has been");
 
-      if (isRetryable) {
-        console.log("[PDF] Rate limit hit — retrying with reduced text after 5s...");
+      if (isRateLimit) {
+        // Wait 60 s — enough for the RPM window to reset on the free tier (15 RPM).
+        // The Flutter client has a 3-minute receive timeout, so this is safe.
+        console.log("[PDF] Gemini rate limit — waiting 60 s before retry...");
         try {
-          await new Promise((r) => setTimeout(r, 5000));
+          await new Promise((r) => setTimeout(r, 60000));
           chapters = await generateChapters(topicName, text.slice(0, MAX_TEXT_CHARS / 2));
         } catch (retryErr) {
           console.error("[PDF] Gemini attempt 2 failed:", retryErr.message);
-          await markFailed(uploadRef, "AI is busy. Please try again in a moment.");
+          await markFailed(
+            uploadRef,
+            "AI rate limit reached. Please wait 1–2 minutes and try again."
+          );
           return res.status(500).json({
             success: false,
-            message: "AI is busy. Please try again in a moment.",
+            message: "AI rate limit reached. Please wait 1–2 minutes and try again.",
           });
         }
       } else {
-        await markFailed(uploadRef, "AI could not process this PDF. Please try again.");
+        await markFailed(uploadRef, `AI error (${status}): ${details.slice(0, 120)}`);
         return res.status(500).json({
           success: false,
           message: "AI could not process this PDF. Please try again.",
