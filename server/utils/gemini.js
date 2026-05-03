@@ -14,9 +14,13 @@ function getClient() {
 /**
  * Returns a configured Gemini model instance.
  * Defaults to GEMINI_MODEL env var, falling back to gemini-1.5-flash.
- * gemini-1.5-flash is used as the default because it is stable across all
- * SDK versions and available on the free tier without additional setup.
- * Set GEMINI_MODEL=gemini-2.0-flash in .env to use the newer model.
+ *
+ * Free-tier daily limits (RPD):
+ *   gemini-1.5-flash-8b → 4,000 RPD  ← recommended for production
+ *   gemini-1.5-flash    → 1,500 RPD
+ *   gemini-2.0-flash    → 1,500 RPD  (may be unstable on SDK v0.21)
+ *
+ * Set GEMINI_MODEL=gemini-1.5-flash-8b in .env for highest free-tier quota.
  */
 function getModel(modelName) {
   const name = modelName || process.env.GEMINI_MODEL || "gemini-1.5-flash";
