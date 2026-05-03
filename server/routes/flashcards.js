@@ -1,39 +1,38 @@
-const express = require('express');
-const Groq = require('groq-sdk');
-const { getFirestore } = require('../utils/firebase');
+const express = require("express");
+const { getModel } = require("../utils/gemini");
+const { getFirestore } = require("../utils/firebase");
 
 const router = express.Router();
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // ─── POST /api/flashcards/generate ────────────────────────────────────────────
-router.post('/generate', async (req, res) => {
+router.post("/generate", async (req, res) => {
   const {
     topicId,
     topicName,
     domainId,
     subjectId,
     examTags = [],
-    difficulty = 'mixed',
+    difficulty = "mixed",
   } = req.body;
 
   if (!topicId || !topicName || !domainId || !subjectId) {
     return res.status(400).json({
       success: false,
-      message: 'topicId, topicName, domainId and subjectId are required.',
+      message: "topicId, topicName, domainId and subjectId are required.",
     });
   }
 
   const db = getFirestore();
   const cardsRef = db
-    .collection('domains')
+    .collection("domains")
     .doc(domainId)
-    .collection('subjects')
+    .collection("subjects")
     .doc(subjectId)
-    .collection('topics')
+    .collection("topics")
     .doc(topicId)
-    .collection('flashcards');
+    .collection("flashcards");
 
-  // ── Check if cards already exist ───────────────────────────────────────────
+  // ── Return existing cards without calling AI ───────────────────────────────
   const existing = await cardsRef.limit(1).get();
   if (!existing.empty) {
     const allExisting = await cardsRef.select().get();
@@ -41,20 +40,18 @@ router.post('/generate', async (req, res) => {
       success: true,
       cardCount: allExisting.size,
       generated: false,
-      message: 'Cards already exist for this topic.',
+      message: "Cards already exist for this topic.",
     });
   }
 
   // ── Build prompt ───────────────────────────────────────────────────────────
   const examContext =
     examTags.length > 0
-      ? `This topic is relevant for: ${examTags.join(', ')}.`
-      : '';
+      ? `This topic is relevant for: ${examTags.join(", ")}.`
+      : "";
 
   const difficultyBreakdown =
-    difficulty === 'mixed'
-      ? '10 easy, 12 medium, 8 hard'
-      : `all ${difficulty}`;
+    difficulty === "mixed" ? "10 easy, 12 medium, 8 hard" : `all ${difficulty}`;
 
   const prompt = `
 You are an expert educator creating MCQ questions for the topic: "${topicName}".
@@ -83,65 +80,66 @@ Rules:
 - No duplicate questions
 - "back" must be the exact text of the correct option
 - Content must be factually accurate for "${topicName}"
-- Tags must be specific subtopics within "${topicName}"
 `.trim();
 
-  // ── Call Groq ──────────────────────────────────────────────────────────────
+  // ── Call Gemini ────────────────────────────────────────────────────────────
   let cards;
   try {
-    const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.6,
-      max_tokens: 8192,
-    });
+    const model = getModel();
+    const result = await model.generateContent(prompt);
+    const raw = result.response.text().trim();
 
-    const text = completion.choices[0].message.content.trim();
-    const cleaned = text
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```\s*$/, '')
+    const cleaned = raw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```\s*$/, "")
       .trim();
 
-    cards = JSON.parse(cleaned);
-    if (!Array.isArray(cards)) throw new Error('Response is not an array');
+    try {
+      cards = JSON.parse(cleaned);
+    } catch (_) {
+      const match = cleaned.match(/\[[\s\S]*\]/);
+      if (!match) throw new Error("AI returned non-JSON response");
+      cards = JSON.parse(match[0]);
+    }
+
+    if (!Array.isArray(cards)) throw new Error("Response is not a JSON array");
   } catch (err) {
-    console.error('[GROQ flashcards]', err.message);
+    const status = err.status || err.statusCode || "unknown";
+    console.error(`[FLASHCARDS] Gemini error (${status}):`, err.message);
     return res.status(500).json({
       success: false,
-      message: 'AI generation failed. Please try again.',
+      message: "AI generation failed. Please try again.",
     });
   }
 
-  // ── Validate and write to Firestore ───────────────────────────────────────
-  const validDifficulties = ['easy', 'medium', 'hard'];
+  // ── Validate + shuffle + write to Firestore ───────────────────────────────
+  const validDiffs = ["easy", "medium", "hard"];
   const now = new Date().toISOString();
-
   const batch = db.batch();
   let written = 0;
 
   cards.forEach((card, index) => {
-    if (!card.front || !Array.isArray(card.options) || card.options.length < 2) return;
+    if (!card.front || !Array.isArray(card.options) || card.options.length < 2)
+      return;
 
-    // Shuffle options so the correct answer is not always in the same position.
-    const rawOptions   = card.options.map(String).slice(0, 4);
-    const rawCorrect   = typeof card.correctOption === 'number' ? card.correctOption : 0;
-    const correctText  = rawOptions[rawCorrect] ?? rawOptions[0];
-    const shuffled     = rawOptions.sort(() => Math.random() - 0.5);
+    const rawOptions = card.options.map(String).slice(0, 4);
+    const rawCorrect =
+      typeof card.correctOption === "number" ? card.correctOption : 0;
+    const correctText = rawOptions[rawCorrect] ?? rawOptions[0];
+    const shuffled = rawOptions.sort(() => Math.random() - 0.5);
     const correctIndex = shuffled.indexOf(correctText);
 
     const ref = cardsRef.doc();
     batch.set(ref, {
       id: ref.id,
       topicId,
-      type: 'mcq',
+      type: "mcq",
       front: String(card.front).trim(),
       back: correctText.trim(),
       options: shuffled,
       correctOption: correctIndex >= 0 ? correctIndex : 0,
       explanation: card.explanation ? String(card.explanation).trim() : null,
-      difficulty: validDifficulties.includes(card.difficulty)
-        ? card.difficulty
-        : 'medium',
+      difficulty: validDiffs.includes(card.difficulty) ? card.difficulty : "medium",
       tags: Array.isArray(card.tags) ? card.tags.slice(0, 3) : [],
       createdAt: now,
       generatedByAI: true,
@@ -152,18 +150,17 @@ Rules:
 
   await batch.commit();
 
-  // ── Update totalCards on topic document ────────────────────────────────────
-  const topicRef = db
-    .collection('domains')
+  // Update topic's totalCards count
+  await db
+    .collection("domains")
     .doc(domainId)
-    .collection('subjects')
+    .collection("subjects")
     .doc(subjectId)
-    .collection('topics')
-    .doc(topicId);
+    .collection("topics")
+    .doc(topicId)
+    .update({ totalCards: written });
 
-  await topicRef.update({ totalCards: written });
-
-  console.log(`[FLASHCARDS] Generated ${written} MCQ cards for topic "${topicName}"`);
+  console.log(`[FLASHCARDS] Generated ${written} cards for "${topicName}"`);
   res.json({ success: true, cardCount: written, generated: true });
 });
 

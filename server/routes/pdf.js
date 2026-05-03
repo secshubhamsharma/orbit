@@ -2,11 +2,10 @@ const express = require("express");
 const multer = require("multer");
 const fs = require("fs");
 const pdfParse = require("pdf-parse");
-const Groq = require("groq-sdk");
+const { getModel } = require("../utils/gemini");
 const { getFirestore } = require("../utils/firebase");
 
 const router = express.Router();
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const UPLOAD_DIR = "/tmp/orbit-uploads";
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -23,41 +22,34 @@ const upload = multer({
   },
 });
 
-// Model is configurable via env so you can override without redeploying code.
-// Default: llama-3.1-8b-instant (131,072 TPM free tier — handles large PDFs).
-// llama-3.3-70b-versatile has only 6,000 TPM and fails on files > ~1 MB.
-const PDF_MODEL = process.env.GROQ_PDF_MODEL || "llama-3.1-8b-instant";
-
-// Token budget breakdown for Groq on_demand tier (6,000 TPM limit):
-//   Prompt template overhead : ~400 tokens
-//   PDF text (8,000 chars)   : ~2,000 tokens
-//   max_tokens output         : 3,200 tokens
-//   Total                     : ~5,600 tokens  ← safely under 6,000 TPM
-// If the account is upgraded to Dev Tier (131,072 TPM), raise these freely.
-const MAX_TEXT_CHARS = 8000;
-const MAX_CHAPTERS = 5;
+// Gemini 2.0 Flash free tier: 1,000,000 TPM — no rate-limit issues on any PDF size.
+// These limits are set for quality, not rate limits.
+const MAX_TEXT_CHARS = 50000; // ~12,500 tokens — covers most 10 MB PDFs well
+const MAX_CHAPTERS = 8;
 const MIN_CHAPTERS = 2;
-const CARDS_PER_CHAPTER_MIN = 3;
-const CARDS_PER_CHAPTER_MAX = 6;
+const CARDS_PER_CHAPTER_MIN = 5;
+const CARDS_PER_CHAPTER_MAX = 8; // 8 chapters × 8 cards = 64 max cards (~6,400 output tokens)
 
-// ─── Groq connectivity test (auth-protected) ─────────────────────────────────
-// Hit GET /api/pdf/test-groq to verify the key and model without uploading a file.
-router.get("/test-groq", async (_req, res) => {
+// ─── Gemini connectivity test ─────────────────────────────────────────────────
+// GET /api/pdf/test-gemini — verify the key works before uploading a PDF.
+router.get("/test-gemini", async (_req, res) => {
   try {
-    const completion = await groq.chat.completions.create({
-      model: PDF_MODEL,
-      messages: [{ role: "user", content: "Reply with the single word: ok" }],
-      temperature: 0,
-      max_tokens: 5,
+    const model = getModel();
+    const result = await model.generateContent(
+      'Reply with the single word: ok'
+    );
+    const reply = result.response.text().trim();
+    res.json({
+      success: true,
+      model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
+      reply,
     });
-    const reply = completion.choices[0].message.content.trim();
-    res.json({ success: true, model: PDF_MODEL, reply });
   } catch (err) {
     const status = err.status || err.statusCode || "unknown";
-    console.error(`[GROQ-TEST] failed (${status}):`, err.message);
+    console.error(`[GEMINI-TEST] failed (${status}):`, err.message);
     res.status(500).json({
       success: false,
-      model: PDF_MODEL,
+      model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
       status,
       message: err.message,
     });
@@ -65,8 +57,8 @@ router.get("/test-groq", async (_req, res) => {
 });
 
 // ─── Multer error handler wrapper ─────────────────────────────────────────────
-// multer calls next(err) on LIMIT_FILE_SIZE etc., bypassing our route handler.
-// We intercept it here so the response shape stays consistent.
+// multer calls next(err) on LIMIT_FILE_SIZE etc., bypassing the route handler.
+// We intercept it so the response shape stays consistent.
 function uploadWithErrorHandling(req, res, next) {
   upload.single("pdf")(req, res, (err) => {
     if (!err) return next();
@@ -84,6 +76,7 @@ function uploadWithErrorHandling(req, res, next) {
   });
 }
 
+// ─── POST /api/pdf/process ────────────────────────────────────────────────────
 router.post("/process", uploadWithErrorHandling, async (req, res) => {
   const { uploadId, topicName, domainId } = req.body;
   const filePath = req.file?.path;
@@ -107,6 +100,7 @@ router.post("/process", uploadWithErrorHandling, async (req, res) => {
   try {
     await uploadRef.update({ status: "processing" });
 
+    // ── 1. Extract text from PDF ─────────────────────────────────────────────
     const buffer = fs.readFileSync(filePath);
     const parsed = await pdfParse(buffer);
     const pageCount = parsed.numpages;
@@ -115,68 +109,43 @@ router.post("/process", uploadWithErrorHandling, async (req, res) => {
     if (rawText.length < 100) {
       await markFailed(
         uploadRef,
-        "Could not extract readable text from this PDF. Make sure it is not a scanned image-only PDF.",
+        "Could not extract readable text from this PDF. Make sure it is not a scanned image-only PDF."
       );
       return res.status(422).json({
         success: false,
-        message: "Could not extract readable text from the PDF.",
+        message:
+          "Could not extract readable text from the PDF. Make sure it is not a scanned image-only file.",
       });
     }
 
     const text = rawText.slice(0, MAX_TEXT_CHARS);
 
-    // Attempt generation. If the first try hits a rate/size limit, retry once
-    // with half the text — large PDFs sometimes push past burst limits.
+    // ── 2. Generate chapters via Gemini ──────────────────────────────────────
     let chapters;
     try {
       chapters = await generateChapters(topicName, text);
     } catch (aiErr) {
+      const status = aiErr.status || aiErr.statusCode || "unknown";
       const details = aiErr.message || "Unknown AI error";
-      // aiErr is a plain Error we threw — status is embedded in the message
-      // e.g. "Groq API error 429: ..." or "Groq API error 400: ..."
-      const statusMatch = details.match(/Groq API error (\d+)/);
-      const statusCode = statusMatch ? statusMatch[1] : "";
-      console.error(`[PDF] Groq attempt 1 failed (status=${statusCode || "unknown"}):`, details);
+      console.error(`[PDF] Gemini attempt 1 failed (status=${status}):`, details);
 
-      // 400 / 403 with "restricted" means the account is banned — not retryable.
-      const isAccountBanned =
-        (statusCode === "400" || statusCode === "403") &&
-        (details.toLowerCase().includes("restricted") ||
-          details.toLowerCase().includes("forbidden") ||
-          details.toLowerCase().includes("deactivated"));
-
-      if (isAccountBanned) {
-        console.error("[PDF] Groq account appears to be restricted. Check your API key / org.");
-        await markFailed(uploadRef, "AI service account is restricted. Please contact support.");
-        return res.status(500).json({
-          success: false,
-          message: "AI service account is restricted. Please contact support.",
-        });
-      }
-
-      // 413 = Groq "Request too large" (on_demand TPM exceeded per-request)
-      // 429 = Groq standard rate limit (TPM exceeded per minute window)
+      // 429 = rate limit (shouldn't happen on free tier, but handle gracefully)
       const isRetryable =
-        statusCode === "429" ||
-        statusCode === "413" ||
+        String(status) === "429" ||
         details.toLowerCase().includes("rate") ||
-        details.toLowerCase().includes("too large") ||
-        details.toLowerCase().includes("context length") ||
-        details.toLowerCase().includes("tokens per minute") ||
-        details.toLowerCase().includes("reduce your message");
+        details.toLowerCase().includes("quota");
 
       if (isRetryable) {
-        console.log("[PDF] Retrying with reduced text (half length)...");
+        console.log("[PDF] Rate limit hit — retrying with reduced text after 5s...");
         try {
-          await new Promise((r) => setTimeout(r, 3000)); // 3 s back-off
+          await new Promise((r) => setTimeout(r, 5000));
           chapters = await generateChapters(topicName, text.slice(0, MAX_TEXT_CHARS / 2));
         } catch (retryErr) {
-          const retryDetails = retryErr.message || "Unknown AI error";
-          console.error("[PDF] Groq attempt 2 failed:", retryDetails);
-          await markFailed(uploadRef, "AI is overloaded. Please try again in a few minutes.");
+          console.error("[PDF] Gemini attempt 2 failed:", retryErr.message);
+          await markFailed(uploadRef, "AI is busy. Please try again in a moment.");
           return res.status(500).json({
             success: false,
-            message: "AI is overloaded. Please try again in a few minutes.",
+            message: "AI is busy. Please try again in a moment.",
           });
         }
       } else {
@@ -191,21 +160,22 @@ router.post("/process", uploadWithErrorHandling, async (req, res) => {
     if (!chapters || chapters.length === 0) {
       await markFailed(
         uploadRef,
-        "AI could not identify any study content in this PDF.",
+        "AI could not identify any study content in this PDF."
       );
       return res
         .status(422)
         .json({ success: false, message: "No study content found in PDF." });
     }
 
+    // ── 3. Write chapters + cards to Firestore ───────────────────────────────
     const { totalCards } = await writeChaptersToFirestore(
       db,
       uploadRef,
       uploadId,
-      chapters,
+      chapters
     );
 
-    // ── 5. Mark completed ────────────────────────────────────────────────────
+    // ── 4. Mark completed ────────────────────────────────────────────────────
     await uploadRef.update({
       status: "completed",
       pageCount,
@@ -214,7 +184,7 @@ router.post("/process", uploadWithErrorHandling, async (req, res) => {
     });
 
     console.log(
-      `[PDF] ${uploadId}: ${chapters.length} chapters, ${totalCards} MCQ cards`,
+      `[PDF] ${uploadId}: ${chapters.length} chapters, ${totalCards} cards`
     );
     res.json({
       success: true,
@@ -224,9 +194,7 @@ router.post("/process", uploadWithErrorHandling, async (req, res) => {
     });
   } catch (err) {
     console.error("[PDF] Unexpected error:", err.message);
-    await markFailed(uploadRef, err.message || "Processing failed").catch(
-      () => {},
-    );
+    await markFailed(uploadRef, err.message || "Processing failed").catch(() => {});
     res.status(500).json({
       success: false,
       message: "PDF processing failed. Please try again.",
@@ -236,6 +204,7 @@ router.post("/process", uploadWithErrorHandling, async (req, res) => {
   }
 });
 
+// ─── AI generation ────────────────────────────────────────────────────────────
 async function generateChapters(topicName, text) {
   const prompt = `
 You are an expert educator. A student uploaded a PDF titled "${topicName}".
@@ -280,22 +249,11 @@ PDF TEXT:
 ${text}
 `.trim();
 
-  let responseText;
-  try {
-    const completion = await groq.chat.completions.create({
-      model: PDF_MODEL,
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.4,
-      max_tokens: 3200,
-    });
-    responseText = completion.choices[0].message.content.trim();
-  } catch (err) {
-    // Surface the real Groq error status so the caller can log it properly
-    const status = err.status || err.statusCode || "unknown";
-    throw new Error(`Groq API error ${status}: ${err.message}`);
-  }
+  const model = getModel();
+  const result = await model.generateContent(prompt);
+  const raw = result.response.text().trim();
 
-  const cleaned = responseText
+  const cleaned = raw
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```\s*$/, "")
     .trim();
@@ -337,6 +295,7 @@ function sanitizeCards(rawCards) {
 
       const options = rawOptions.sort(() => Math.random() - 0.5);
       const correctOption = Math.max(0, options.indexOf(correctText));
+
       return {
         type: "mcq",
         front: String(c.front).trim(),
@@ -352,12 +311,11 @@ function sanitizeCards(rawCards) {
     });
 }
 
-// ─── Write chapters + cards to Firestore ──────────────────────────────────────
+// ─── Firestore batch write ────────────────────────────────────────────────────
 // Rolling batch — commits every 200 ops to stay well under Firestore's 500 limit.
 async function writeChaptersToFirestore(db, uploadRef, uploadId, chapters) {
   const now = new Date().toISOString();
   let totalCards = 0;
-
   let batch = db.batch();
   let opsInBatch = 0;
 
@@ -404,6 +362,7 @@ async function writeChaptersToFirestore(db, uploadRef, uploadId, chapters) {
   return { totalCards };
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 async function markFailed(uploadRef, error) {
   return uploadRef.update({ status: "failed", error }).catch(() => {});
 }

@@ -57,8 +57,9 @@ app.use((err, req, res, _next) => {
 });
 
 app.listen(PORT, () => {
-  const pdfModel = process.env.GROQ_PDF_MODEL || "llama-3.1-8b-instant";
+  const model = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  const key = process.env.GEMINI_API_KEY;
   console.log(`Orbit server running on port ${PORT}`);
-  console.log(`PDF model  : ${pdfModel}`);
-  console.log(`Groq key   : ${process.env.GROQ_API_KEY ? process.env.GROQ_API_KEY.slice(0, 8) + "..." : "NOT SET"}`);
+  console.log(`AI model   : ${model}`);
+  console.log(`Gemini key : ${key ? key.slice(0, 8) + "..." : "NOT SET ⚠️"}`);
 });
