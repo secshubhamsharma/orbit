@@ -27,40 +27,60 @@ function _parseRetryDelay(err) {
   return match ? parseInt(match[1], 10) + 5 : 65;
 }
 
+// Free models to try in order — if one is unavailable, fall through to the next
+const OR_FREE_MODELS = process.env.OPENROUTER_MODEL
+  ? [process.env.OPENROUTER_MODEL]
+  : [
+      "mistralai/mistral-7b-instruct:free",
+      "google/gemma-3-12b-it:free",
+      "meta-llama/llama-3.2-3b-instruct:free",
+      "microsoft/phi-3-mini-128k-instruct:free",
+    ];
+
 async function _openRouterGenerate(prompt) {
   const orKey = process.env.OPENROUTER_API_KEY;
   if (!orKey) throw new Error("OPENROUTER_API_KEY not set in .env");
 
-  const orModel =
-    process.env.OPENROUTER_MODEL || "meta-llama/llama-3.1-8b-instruct:free";
+  let lastErr;
+  for (const orModel of OR_FREE_MODELS) {
+    console.warn(`  ↩️  OpenRouter (${orModel})`);
 
-  console.warn(`  ↩️  OpenRouter (${orModel})`);
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${orKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://orbitapp.io",
+        "X-Title": "Orbit Seed Script",
+      },
+      body: JSON.stringify({
+        model: orModel,
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 8192,
+        temperature: 0.4,
+      }),
+    });
 
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${orKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://orbitapp.io",
-      "X-Title": "Orbit Seed Script",
-    },
-    body: JSON.stringify({
-      model: orModel,
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: 8192,
-      temperature: 0.4,
-    }),
-  });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const msg = body.error?.message || `HTTP ${res.status}`;
+      console.warn(`     ❌ ${orModel} failed: ${msg}`);
+      lastErr = new Error(`OpenRouter ${orModel}: ${msg}`);
+      continue;
+    }
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(`OpenRouter HTTP ${res.status}: ${body.error?.message || "unknown"}`);
+    const data = await res.json();
+    const text = data.choices?.[0]?.message?.content;
+    if (!text) {
+      console.warn(`     ❌ ${orModel} returned empty response`);
+      lastErr = new Error("OpenRouter returned empty response");
+      continue;
+    }
+
+    return text;
   }
 
-  const data = await res.json();
-  const text = data.choices?.[0]?.message?.content;
-  if (!text) throw new Error("OpenRouter returned empty response");
-  return text;
+  throw lastErr || new Error("All OpenRouter models failed");
 }
 
 async function generateText(prompt) {
