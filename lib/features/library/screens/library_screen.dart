@@ -752,12 +752,12 @@ class _SubjectCardState extends State<_SubjectCard>
             Transform.scale(scale: _press.value, child: child),
         child: SizedBox(
           width: 140,
+          height: 185,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Cover card — book-spine style
-              SizedBox(
-                height: 138,
+              Expanded(
                 child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -1141,12 +1141,12 @@ class _BookCarouselCardState extends State<_BookCarouselCard>
             Transform.scale(scale: _press.value, child: child),
         child: SizedBox(
           width: 130,
+          height: 210,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Cover
-              SizedBox(
-                height: 142,
+              // Cover — fills all space above text
+              Expanded(
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
@@ -1203,27 +1203,24 @@ class _BookCarouselCardState extends State<_BookCarouselCard>
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
-              const SizedBox(height: AppSpacing.xs),
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.sm, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: AppColors.kPrimaryContainer,
-                      borderRadius:
-                          BorderRadius.circular(AppSpacing.radiusFull),
-                    ),
-                    child: Text(
-                      '${book.totalChapters} ch',
-                      style: AppTextStyles.caption.copyWith(
-                        color: AppColors.kPrimary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.sm, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.kPrimaryContainer,
+                  borderRadius:
+                      BorderRadius.circular(AppSpacing.radiusFull),
+                ),
+                child: Text(
+                  '${book.totalChapters} ch',
+                  style: AppTextStyles.caption.copyWith(
+                    color: AppColors.kPrimary,
+                    fontWeight: FontWeight.w600,
                   ),
-                ],
+                ),
               ),
+              const SizedBox(height: 4),
             ],
           ),
         ),

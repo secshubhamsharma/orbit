@@ -1,5 +1,7 @@
 require("dotenv").config();
+
 const admin = require("firebase-admin");
+const { generateText } = require("./utils/ai");
 const serviceAccount = require("./serviceAccountKey.json");
 
 admin.initializeApp({
@@ -7,6 +9,13 @@ admin.initializeApp({
 });
 
 const db = admin.firestore();
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+
+const QUESTIONS_PER_CHAPTER = 15;
+const DELAY_BETWEEN_CHAPTERS_MS = 2500;
+
+// ─── Library data ─────────────────────────────────────────────────────────────
 
 const library = [
   {
@@ -240,6 +249,145 @@ const library = [
   },
 ];
 
+// ─── MCQ generation ───────────────────────────────────────────────────────────
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function generateMCQs(chapterName, bookTitle, examTags, chapterTags) {
+  const examContext = examTags.length > 0
+    ? `This chapter is part of ${examTags.join(", ")} exam preparation.`
+    : "";
+
+  const prompt = `
+You are an expert educator. Generate exactly ${QUESTIONS_PER_CHAPTER} MCQ practice questions for:
+
+Chapter: "${chapterName}"
+Course/Book: "${bookTitle}"
+${examContext}
+
+CRITICAL RULES:
+1. Return ONLY a valid JSON array — no markdown, no code fences, no extra text.
+2. Each question must have exactly 4 options.
+3. VARY the correct answer position — spread correctIndex across 0, 1, 2, 3 randomly. Do NOT put the answer always at 0 or 1.
+4. Wrong options must be plausible but clearly incorrect on careful thought.
+5. Questions must test real understanding, not just keyword recognition.
+6. All content must be factually accurate for "${chapterName}".
+
+JSON array shape (return ONLY this):
+[
+  {
+    "front": "Clear question text?",
+    "back": "The correct answer text",
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correctIndex": 2,
+    "explanation": "Why this is correct in one sentence.",
+    "difficulty": "beginner"
+  }
+]
+
+- correctIndex is 0-based; vary it: first few questions use 0,1 then 2,3 then mix
+- difficulty values: "beginner", "intermediate", "advanced"
+- back must exactly match options[correctIndex]
+- Generate all ${QUESTIONS_PER_CHAPTER} questions now
+`.trim();
+
+  const raw = await generateText(prompt);
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
+
+  let cards;
+  try {
+    cards = JSON.parse(cleaned);
+  } catch (_) {
+    const match = cleaned.match(/\[[\s\S]*\]/);
+    if (!match) throw new Error("AI did not return a JSON array");
+    cards = JSON.parse(match[0]);
+  }
+
+  if (!Array.isArray(cards) || cards.length === 0) {
+    throw new Error("Empty or non-array AI response");
+  }
+
+  return cards;
+}
+
+async function seedChapterMCQs(chapterRef, chapter, book, domainId) {
+  const flashcardsRef = chapterRef.collection("flashcards");
+
+  const existing = await flashcardsRef.limit(1).get();
+  if (!existing.empty) {
+    console.log(`        ⏭  "${chapter.name}" — already has questions, skipping`);
+    return 0;
+  }
+
+  console.log(`        🤖 Generating ${QUESTIONS_PER_CHAPTER} MCQs for "${chapter.name}"...`);
+
+  let cards;
+  try {
+    cards = await generateMCQs(
+      chapter.name,
+      book.title,
+      book.examTags || [],
+      chapter.tags || [],
+    );
+  } catch (err) {
+    console.error(`        ❌ Failed: ${err.message}`);
+    return 0;
+  }
+
+  const validDiffs = ["beginner", "intermediate", "advanced"];
+  const now = new Date().toISOString();
+  const batch = db.batch();
+  let written = 0;
+
+  cards.forEach((card, index) => {
+    if (!card.front || !Array.isArray(card.options) || card.options.length < 2) return;
+
+    const rawOptions = card.options.map(String).slice(0, 4);
+    while (rawOptions.length < 4) rawOptions.push(`Option ${rawOptions.length + 1}`);
+
+    const rawCorrect =
+      typeof card.correctIndex === "number" ? card.correctIndex :
+      typeof card.correctOption === "number" ? card.correctOption : 0;
+
+    const correctText = rawOptions[Math.min(rawCorrect, rawOptions.length - 1)];
+
+    // Shuffle so the correct answer appears at a random position
+    const shuffled = [...rawOptions].sort(() => Math.random() - 0.5);
+    const finalCorrectIndex = shuffled.indexOf(correctText);
+
+    const ref = flashcardsRef.doc();
+    batch.set(ref, {
+      id: ref.id,
+      topicId: chapter.id,
+      type: "mcq",
+      front: String(card.front).trim(),
+      back: correctText.trim(),
+      options: shuffled,
+      correctOption: finalCorrectIndex >= 0 ? finalCorrectIndex : 0,
+      explanation: card.explanation ? String(card.explanation).trim() : null,
+      difficulty: validDiffs.includes(card.difficulty) ? card.difficulty : "intermediate",
+      tags: (chapter.tags || []).slice(0, 3),
+      createdAt: now,
+      generatedByAI: true,
+      order: index,
+    });
+    written++;
+  });
+
+  await batch.commit();
+  await chapterRef.update({ totalCards: written });
+
+  console.log(`        ✅ ${written} MCQs written`);
+  return written;
+}
+
+// ─── Seeding ──────────────────────────────────────────────────────────────────
+
 async function seedDomain(domainData) {
   const domainRef = db.collection("domains").doc(domainData.domain.id);
   await domainRef.set(domainData.domain, { merge: true });
@@ -248,44 +396,71 @@ async function seedDomain(domainData) {
   for (const subject of domainData.subjects) {
     const { books, ...subjectData } = subject;
     const subjectRef = domainRef.collection("subjects").doc(subject.id);
-    await subjectRef.set({ ...subjectData, domainId: domainData.domain.id }, { merge: true });
+    await subjectRef.set(
+      { ...subjectData, domainId: domainData.domain.id },
+      { merge: true },
+    );
     console.log(`    ✅ Subject: ${subject.name}`);
 
     for (const book of books) {
       const { chapters, ...bookData } = book;
       const bookRef = subjectRef.collection("books").doc(book.id);
-      await bookRef.set({
-        ...bookData,
-        domainId: domainData.domain.id,
-        subjectId: subject.id,
-      }, { merge: true });
-      console.log(`      ✅ Book: ${book.title} (id: ${book.id})`);
+      await bookRef.set(
+        {
+          ...bookData,
+          domainId: domainData.domain.id,
+          subjectId: subject.id,
+        },
+        { merge: true },
+      );
+      console.log(`      ✅ Book: ${book.title} (${book.id})`);
 
       for (const chapter of chapters) {
         const chapterRef = bookRef.collection("chapters").doc(chapter.id);
-        await chapterRef.set({
-          ...chapter,
-          bookId: book.id,
-          subjectId: subject.id,
-          domainId: domainData.domain.id,
-          totalCards: 0,
-          generatedByAI: true,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
+        await chapterRef.set(
+          {
+            ...chapter,
+            bookId: book.id,
+            subjectId: subject.id,
+            domainId: domainData.domain.id,
+            generatedByAI: true,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+
+        // Generate MCQs — rate-limited with delay between calls
+        await seedChapterMCQs(chapterRef, chapter, book, domainData.domain.id);
+        await sleep(DELAY_BETWEEN_CHAPTERS_MS);
       }
-      console.log(`        ✅ ${chapters.length} chapters seeded`);
+
+      console.log(`        📚 ${chapters.length} chapters seeded`);
     }
   }
 }
 
 async function run() {
-  console.log("🚀 Seeding Orbit library to Firestore...\n");
+  console.log("🚀 Seeding Orbit library to Firestore...");
+  console.log(`   Generating ${QUESTIONS_PER_CHAPTER} MCQs per chapter with ${DELAY_BETWEEN_CHAPTERS_MS}ms delay\n`);
+
+  const totalChapters = library.reduce(
+    (sum, entry) =>
+      sum +
+      entry.subjects.reduce(
+        (s2, subj) =>
+          s2 + subj.books.reduce((s3, book) => s3 + book.chapters.length, 0),
+        0,
+      ),
+    0,
+  );
+
+  console.log(`   📖 ${totalChapters} chapters total — estimated ~${Math.ceil((totalChapters * DELAY_BETWEEN_CHAPTERS_MS) / 60000)} min\n`);
 
   for (const entry of library) {
     await seedDomain(entry);
   }
 
-  console.log("\n✅ Seed complete. Run the app to see the library.");
+  console.log("\n✅ Seed complete. All MCQs are pre-generated.");
   process.exit(0);
 }
 
