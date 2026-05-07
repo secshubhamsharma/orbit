@@ -20,7 +20,7 @@ async function generateText(prompt) {
 
     const genai = new GoogleGenerativeAI(apiKey);
     const model = genai.getGenerativeModel({
-      model: process.env.GEMINI_MODEL || "gemini-1.5-flash",
+      model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
       generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
     });
     const result = await model.generateContent(prompt);
