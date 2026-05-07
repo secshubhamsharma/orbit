@@ -10,62 +10,92 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-// ─── Inline AI helper (Gemini → OpenRouter fallback) ─────────────────────────
+// ─── Inline AI helper (Gemini with retry → OpenRouter fallback) ──────────────
+
+function _isQuotaError(err) {
+  const msg = (err.message || "").toLowerCase();
+  return (
+    msg.includes("429") ||
+    msg.includes("quota") ||
+    msg.includes("rate") ||
+    msg.includes("too many requests")
+  );
+}
+
+function _parseRetryDelay(err) {
+  const match = (err.message || "").match(/retry[^0-9]*(\d+)s/i);
+  return match ? parseInt(match[1], 10) + 5 : 65;
+}
+
+async function _openRouterGenerate(prompt) {
+  const orKey = process.env.OPENROUTER_API_KEY;
+  if (!orKey) throw new Error("OPENROUTER_API_KEY not set in .env");
+
+  const orModel =
+    process.env.OPENROUTER_MODEL || "meta-llama/llama-3.1-8b-instruct:free";
+
+  console.warn(`  ↩️  OpenRouter (${orModel})`);
+
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${orKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://orbitapp.io",
+      "X-Title": "Orbit Seed Script",
+    },
+    body: JSON.stringify({
+      model: orModel,
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 8192,
+      temperature: 0.4,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(`OpenRouter HTTP ${res.status}: ${body.error?.message || "unknown"}`);
+  }
+
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content;
+  if (!text) throw new Error("OpenRouter returned empty response");
+  return text;
+}
 
 async function generateText(prompt) {
-  // Try Gemini first
-  try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error("GEMINI_API_KEY not set");
+  const apiKey = process.env.GEMINI_API_KEY;
+  // Use gemini-2.0-flash-lite — free tier with 30 RPM / 1500 RPD
+  const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash-lite";
+  const MAX_GEMINI_RETRIES = 2;
 
-    const genai = new GoogleGenerativeAI(apiKey);
-    const model = genai.getGenerativeModel({
-      model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
-      generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
-    });
-    const result = await model.generateContent(prompt);
-    return result.response.text();
-  } catch (err) {
-    const isRateLimit =
-      String(err.status || err.statusCode || "") === "429" ||
-      (err.message || "").toLowerCase().includes("quota") ||
-      (err.message || "").toLowerCase().includes("rate");
+  if (apiKey) {
+    for (let attempt = 1; attempt <= MAX_GEMINI_RETRIES; attempt++) {
+      try {
+        const genai = new GoogleGenerativeAI(apiKey);
+        const model = genai.getGenerativeModel({
+          model: modelName,
+          generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
+        });
+        const result = await model.generateContent(prompt);
+        return result.response.text();
+      } catch (err) {
+        if (!_isQuotaError(err)) throw err;
 
-    const orKey = process.env.OPENROUTER_API_KEY;
-    if (!isRateLimit || !orKey) throw err;
-
-    console.warn("  ⚠️  Gemini rate-limited — switching to OpenRouter");
-
-    const orModel =
-      process.env.OPENROUTER_MODEL ||
-      "meta-llama/llama-3.1-8b-instruct:free";
-
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${orKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://orbitapp.io",
-        "X-Title": "Orbit Seed Script",
-      },
-      body: JSON.stringify({
-        model: orModel,
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 8192,
-        temperature: 0.4,
-      }),
-    });
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(`OpenRouter: ${body.error?.message || `HTTP ${res.status}`}`);
+        if (attempt < MAX_GEMINI_RETRIES) {
+          const waitSec = _parseRetryDelay(err);
+          console.warn(`  ⏳ Gemini quota hit — waiting ${waitSec}s then retrying...`);
+          await sleep(waitSec * 1000);
+        } else {
+          console.warn("  ⚠️  Gemini quota exhausted — switching to OpenRouter");
+          return _openRouterGenerate(prompt);
+        }
+      }
     }
-
-    const data = await res.json();
-    const text = data.choices?.[0]?.message?.content;
-    if (!text) throw new Error("OpenRouter returned empty response");
-    return text;
   }
+
+  // No Gemini key — go straight to OpenRouter
+  return _openRouterGenerate(prompt);
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
