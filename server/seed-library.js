@@ -1,7 +1,7 @@
 require("dotenv").config();
 
 const admin = require("firebase-admin");
-const { generateText } = require("./utils/ai");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const serviceAccount = require("./serviceAccountKey.json");
 
 admin.initializeApp({
@@ -9,6 +9,64 @@ admin.initializeApp({
 });
 
 const db = admin.firestore();
+
+// ─── Inline AI helper (Gemini → OpenRouter fallback) ─────────────────────────
+
+async function generateText(prompt) {
+  // Try Gemini first
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error("GEMINI_API_KEY not set");
+
+    const genai = new GoogleGenerativeAI(apiKey);
+    const model = genai.getGenerativeModel({
+      model: process.env.GEMINI_MODEL || "gemini-1.5-flash",
+      generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
+    });
+    const result = await model.generateContent(prompt);
+    return result.response.text();
+  } catch (err) {
+    const isRateLimit =
+      String(err.status || err.statusCode || "") === "429" ||
+      (err.message || "").toLowerCase().includes("quota") ||
+      (err.message || "").toLowerCase().includes("rate");
+
+    const orKey = process.env.OPENROUTER_API_KEY;
+    if (!isRateLimit || !orKey) throw err;
+
+    console.warn("  ⚠️  Gemini rate-limited — switching to OpenRouter");
+
+    const orModel =
+      process.env.OPENROUTER_MODEL ||
+      "meta-llama/llama-3.1-8b-instruct:free";
+
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${orKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://orbitapp.io",
+        "X-Title": "Orbit Seed Script",
+      },
+      body: JSON.stringify({
+        model: orModel,
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 8192,
+        temperature: 0.4,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(`OpenRouter: ${body.error?.message || `HTTP ${res.status}`}`);
+    }
+
+    const data = await res.json();
+    const text = data.choices?.[0]?.message?.content;
+    if (!text) throw new Error("OpenRouter returned empty response");
+    return text;
+  }
+}
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
