@@ -131,17 +131,51 @@ class FirestoreService {
   // ---------------------------------------------------------------------------
 
   Future<List<DomainModel>> getDomains() async {
-    final snap = await _domains.orderBy('order').get();
-    return snap.docs
-        .map((d) => DomainModel.fromJson(_clean(d.data())))
-        .toList();
+    try {
+      final snap = await _domains.orderBy('order').get();
+      return snap.docs.map((d) {
+        final data = _clean(d.data());
+        data.putIfAbsent('id', () => d.id);
+        return DomainModel.fromJson(data);
+      }).toList();
+    } on FirebaseException catch (e) {
+      if (e.code == 'failed-precondition' || e.code == 'invalid-argument') {
+        final snap = await _domains.orderBy('name').get();
+        return snap.docs.map((d) {
+          final data = _clean(d.data());
+          data.putIfAbsent('id', () => d.id);
+          return DomainModel.fromJson(data);
+        }).toList();
+      }
+      rethrow;
+    }
   }
 
   Future<List<SubjectModel>> getSubjects(String domainId) async {
-    final snap = await _subjects(domainId).orderBy('order').get();
-    return snap.docs
-        .map((d) => SubjectModel.fromJson(_clean(d.data())))
-        .toList();
+    try {
+      final snap = await _subjects(domainId).orderBy('order').get();
+      return snap.docs
+          .map((d) {
+            final data = _clean(d.data());
+            data.putIfAbsent('domainId', () => domainId);
+            data.putIfAbsent('id', () => d.id);
+            return SubjectModel.fromJson(data);
+          })
+          .toList();
+    } on FirebaseException catch (e) {
+      if (e.code == 'failed-precondition' || e.code == 'invalid-argument') {
+        final snap = await _subjects(domainId).orderBy('name').get();
+        return snap.docs
+            .map((d) {
+              final data = _clean(d.data());
+              data.putIfAbsent('domainId', () => domainId);
+              data.putIfAbsent('id', () => d.id);
+              return SubjectModel.fromJson(data);
+            })
+            .toList();
+      }
+      rethrow;
+    }
   }
 
   Future<List<TopicModel>> getTopics(

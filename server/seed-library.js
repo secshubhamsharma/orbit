@@ -248,7 +248,7 @@ async function seedDomain(domainData) {
   for (const subject of domainData.subjects) {
     const { books, ...subjectData } = subject;
     const subjectRef = domainRef.collection("subjects").doc(subject.id);
-    await subjectRef.set(subjectData, { merge: true });
+    await subjectRef.set({ ...subjectData, domainId: domainData.domain.id }, { merge: true });
     console.log(`    ✅ Subject: ${subject.name}`);
 
     for (const book of books) {
