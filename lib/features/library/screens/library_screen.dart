@@ -11,6 +11,7 @@ import 'package:orbitapp/models/book_model.dart';
 import 'package:orbitapp/models/domain_model.dart';
 import 'package:orbitapp/models/subject_model.dart';
 import 'package:orbitapp/providers/library_provider.dart';
+import 'package:orbitapp/shared/widgets/book_cover_illustration.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers — category colours / emojis keyed by Firestore domain id
@@ -1118,21 +1119,9 @@ class _BookCarouselCardState extends State<_BookCarouselCard>
     super.dispose();
   }
 
-  // A deterministic gradient per book title
-  static const _palettes = [
-    [Color(0xFF7C6FE8), Color(0xFF4ECDC4)],
-    [Color(0xFFFF6B9D), Color(0xFFFF9F43)],
-    [Color(0xFF51CF66), Color(0xFF4ECDC4)],
-    [Color(0xFFFFD43B), Color(0xFFFF6B9D)],
-    [Color(0xFF4ECDC4), Color(0xFF7C6FE8)],
-    [Color(0xFFFF9F43), Color(0xFF7C6FE8)],
-  ];
-
   @override
   Widget build(BuildContext context) {
     final book = widget.book;
-    final palette = _palettes[
-        book.title.isNotEmpty ? book.title.codeUnitAt(0) % _palettes.length : 0];
 
     return GestureDetector(
       onTapDown: (_) {
@@ -1156,33 +1145,41 @@ class _BookCarouselCardState extends State<_BookCarouselCard>
             children: [
               // Cover
               Expanded(
-                child: ClipRRect(
-                  borderRadius:
-                      BorderRadius.circular(AppSpacing.radiusMd),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      book.coverUrl.isNotEmpty
-                          ? CachedNetworkImage(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    book.coverUrl.isNotEmpty
+                        ? ClipRRect(
+                            borderRadius:
+                                BorderRadius.circular(AppSpacing.radiusMd),
+                            child: CachedNetworkImage(
                               imageUrl: book.coverUrl,
                               fit: BoxFit.cover,
-                              placeholder: (ctx, url) =>
-                                  _GradCover(palette: palette, title: book.title),
+                              placeholder: (ctx, url) => BookCoverIllustration(
+                                bookId: book.id,
+                                borderRadius: AppSpacing.radiusMd,
+                              ),
                               errorWidget: (ctx, url, err) =>
-                                  _GradCover(palette: palette, title: book.title),
-                            )
-                          : _GradCover(palette: palette, title: book.title),
-                      // Subtle sheen border
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.08)),
-                          borderRadius:
-                              BorderRadius.circular(AppSpacing.radiusMd),
-                        ),
+                                  BookCoverIllustration(
+                                bookId: book.id,
+                                borderRadius: AppSpacing.radiusMd,
+                              ),
+                            ),
+                          )
+                        : BookCoverIllustration(
+                            bookId: book.id,
+                            borderRadius: AppSpacing.radiusMd,
+                          ),
+                    // Subtle sheen border
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.08)),
+                        borderRadius:
+                            BorderRadius.circular(AppSpacing.radiusMd),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: AppSpacing.sm),
@@ -1233,34 +1230,6 @@ class _BookCarouselCardState extends State<_BookCarouselCard>
   }
 }
 
-class _GradCover extends StatelessWidget {
-  final List<Color> palette;
-  final String title;
-
-  const _GradCover({required this.palette, required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: palette,
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        title.isNotEmpty ? title[0].toUpperCase() : '?',
-        style: const TextStyle(
-          fontSize: 44,
-          fontWeight: FontWeight.w800,
-          color: Colors.white,
-        ),
-      ),
-    );
-  }
-}
 
 class _BookCarouselSkeleton extends StatefulWidget {
   @override

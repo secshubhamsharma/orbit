@@ -12,6 +12,7 @@ import 'package:orbitapp/core/constants/app_text_styles.dart';
 import 'package:orbitapp/models/book_model.dart';
 import 'package:orbitapp/models/chapter_model.dart';
 import 'package:orbitapp/providers/library_provider.dart';
+import 'package:orbitapp/shared/widgets/book_cover_illustration.dart';
 
 // ---------------------------------------------------------------------------
 // Book screen — shows chapters list
@@ -331,7 +332,7 @@ class _CoverSliverAppBar extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        background: _CoverBackground(coverUrl: book.coverUrl),
+        background: _CoverBackground(coverUrl: book.coverUrl, bookId: book.id),
       ),
     );
   }
@@ -339,8 +340,9 @@ class _CoverSliverAppBar extends StatelessWidget {
 
 class _CoverBackground extends StatelessWidget {
   final String coverUrl;
+  final String bookId;
 
-  const _CoverBackground({required this.coverUrl});
+  const _CoverBackground({required this.coverUrl, required this.bookId});
 
   @override
   Widget build(BuildContext context) {
@@ -357,14 +359,9 @@ class _CoverBackground extends StatelessWidget {
             ),
           )
         else
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: AppColors.kGradientPrimary,
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
+          BookCoverIllustration(
+            bookId: bookId,
+            borderRadius: 0,
           ),
 
         // Centered crisp cover (book spine look)
@@ -388,11 +385,12 @@ class _CoverBackground extends StatelessWidget {
                   ? CachedNetworkImage(
                       imageUrl: coverUrl,
                       fit: BoxFit.cover,
-                      placeholder: (ctx, url) => _FallbackCover(title: ''),
+                      placeholder: (ctx, url) =>
+                          _FallbackCover(bookId: bookId),
                       errorWidget: (ctx, url, err) =>
-                          _FallbackCover(title: ''),
+                          _FallbackCover(bookId: bookId),
                     )
-                  : _FallbackCover(title: ''),
+                  : _FallbackCover(bookId: bookId),
             ),
           ),
         ),
@@ -414,23 +412,13 @@ class _CoverBackground extends StatelessWidget {
 }
 
 class _FallbackCover extends StatelessWidget {
-  final String title;
+  final String bookId;
 
-  const _FallbackCover({required this.title});
+  const _FallbackCover({required this.bookId});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: AppColors.kGradientPrimary,
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
-      alignment: Alignment.center,
-      child: const Text('📚', style: TextStyle(fontSize: 40)),
-    );
+    return BookCoverIllustration(bookId: bookId, borderRadius: 0);
   }
 }
 
