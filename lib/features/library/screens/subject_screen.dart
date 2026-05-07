@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,6 +9,7 @@ import 'package:orbitapp/core/constants/app_spacing.dart';
 import 'package:orbitapp/core/constants/app_text_styles.dart';
 import 'package:orbitapp/models/book_model.dart';
 import 'package:orbitapp/providers/library_provider.dart';
+import 'package:orbitapp/shared/widgets/book_cover_illustration.dart';
 
 // ---------------------------------------------------------------------------
 // Subject screen — shows the books grid within a subject
@@ -421,12 +420,12 @@ class _BookCover extends StatelessWidget {
               imageUrl: book.coverUrl,
               fit: BoxFit.cover,
               placeholder: (ctx, url) =>
-                  _GradientPlaceholder(title: book.title),
+                  BookCoverIllustration(bookId: book.id, borderRadius: 0),
               errorWidget: (ctx, url, err) =>
-                  _GradientPlaceholder(title: book.title),
+                  BookCoverIllustration(bookId: book.id, borderRadius: 0),
             )
           else
-            _GradientPlaceholder(title: book.title),
+            BookCoverIllustration(bookId: book.id, borderRadius: 0),
 
           // Subtle border overlay
           DecoratedBox(
@@ -437,46 +436,6 @@ class _BookCover extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _GradientPlaceholder extends StatelessWidget {
-  final String title;
-
-  static final _palettes = [
-    [const Color(0xFF7C6FE8), const Color(0xFF4ECDC4)],
-    [const Color(0xFFFF6B9D), const Color(0xFFFF9F43)],
-    [const Color(0xFF51CF66), const Color(0xFF4ECDC4)],
-    [const Color(0xFFFFD43B), const Color(0xFFFF6B9D)],
-    [const Color(0xFF4ECDC4), const Color(0xFF7C6FE8)],
-  ];
-
-  const _GradientPlaceholder({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = _palettes[math.max(0, title.codeUnitAt(0)) % _palettes.length];
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: palette,
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
-      alignment: Alignment.center,
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        child: Text(
-          title.isNotEmpty ? title[0].toUpperCase() : '?',
-          style: const TextStyle(
-            fontSize: 48,
-            fontWeight: FontWeight.w800,
-            color: Colors.white,
-          ),
-        ),
       ),
     );
   }

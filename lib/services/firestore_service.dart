@@ -749,14 +749,33 @@ class FirestoreService {
   // ---------------------------------------------------------------------------
 
   Future<List<BookModel>> getBooks(String domainId, String subjectId) async {
-    final snap = await _books(domainId, subjectId).orderBy('order').get();
-    return snap.docs.map((d) => BookModel.fromJson(_clean(d.data()))).toList();
+    List<BookModel> _parse(QuerySnapshot<Map<String, dynamic>> snap) =>
+        snap.docs.map((d) {
+          final data = _clean(d.data());
+          data.putIfAbsent('id', () => d.id);
+          data.putIfAbsent('domainId', () => domainId);
+          data.putIfAbsent('subjectId', () => subjectId);
+          return BookModel.fromJson(data);
+        }).toList();
+
+    try {
+      return _parse(await _books(domainId, subjectId).orderBy('order').get());
+    } on FirebaseException catch (e) {
+      if (e.code == 'failed-precondition' || e.code == 'invalid-argument') {
+        return _parse(await _books(domainId, subjectId).orderBy('title').get());
+      }
+      rethrow;
+    }
   }
 
   Future<BookModel?> getBook(String domainId, String subjectId, String bookId) async {
     final snap = await _books(domainId, subjectId).doc(bookId).get();
     if (!snap.exists || snap.data() == null) return null;
-    return BookModel.fromJson(_clean(snap.data()!));
+    final data = _clean(snap.data()!);
+    data.putIfAbsent('id', () => bookId);
+    data.putIfAbsent('domainId', () => domainId);
+    data.putIfAbsent('subjectId', () => subjectId);
+    return BookModel.fromJson(data);
   }
 
   // ---------------------------------------------------------------------------
@@ -764,14 +783,39 @@ class FirestoreService {
   // ---------------------------------------------------------------------------
 
   Future<List<ChapterModel>> getChapters(String domainId, String subjectId, String bookId) async {
-    final snap = await _chapters(domainId, subjectId, bookId).orderBy('chapterNumber').get();
-    return snap.docs.map((d) => ChapterModel.fromJson(_clean(d.data()))).toList();
+    final now = DateTime.now().toIso8601String();
+
+    List<ChapterModel> _parse(QuerySnapshot<Map<String, dynamic>> snap) =>
+        snap.docs.map((d) {
+          final data = _clean(d.data());
+          data.putIfAbsent('id', () => d.id);
+          data.putIfAbsent('domainId', () => domainId);
+          data.putIfAbsent('subjectId', () => subjectId);
+          data.putIfAbsent('bookId', () => bookId);
+          data.putIfAbsent('createdAt', () => now);
+          return ChapterModel.fromJson(data);
+        }).toList();
+
+    try {
+      return _parse(await _chapters(domainId, subjectId, bookId).orderBy('chapterNumber').get());
+    } on FirebaseException catch (e) {
+      if (e.code == 'failed-precondition' || e.code == 'invalid-argument') {
+        return _parse(await _chapters(domainId, subjectId, bookId).orderBy('name').get());
+      }
+      rethrow;
+    }
   }
 
   Future<ChapterModel?> getChapter(String domainId, String subjectId, String bookId, String chapterId) async {
     final snap = await _chapters(domainId, subjectId, bookId).doc(chapterId).get();
     if (!snap.exists || snap.data() == null) return null;
-    return ChapterModel.fromJson(_clean(snap.data()!));
+    final data = _clean(snap.data()!);
+    data.putIfAbsent('id', () => chapterId);
+    data.putIfAbsent('domainId', () => domainId);
+    data.putIfAbsent('subjectId', () => subjectId);
+    data.putIfAbsent('bookId', () => bookId);
+    data.putIfAbsent('createdAt', () => DateTime.now().toIso8601String());
+    return ChapterModel.fromJson(data);
   }
 
   // ---------------------------------------------------------------------------

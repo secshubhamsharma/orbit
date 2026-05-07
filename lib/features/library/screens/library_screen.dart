@@ -756,7 +756,8 @@ class _SubjectCardState extends State<_SubjectCard>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Cover card — book-spine style
-              Expanded(
+              SizedBox(
+                height: 138,
                 child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -1144,7 +1145,8 @@ class _BookCarouselCardState extends State<_BookCarouselCard>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Cover
-              Expanded(
+              SizedBox(
+                height: 142,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
